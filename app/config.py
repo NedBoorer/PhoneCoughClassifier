@@ -54,7 +54,13 @@ class Settings(BaseSettings):
     high_risk_threshold: float = 0.85
     missed_call_callback_enabled: bool = True
 
-    
+    # Farmer-Specific Features
+    enable_farmer_screening: bool = True
+    enable_family_screening: bool = True
+    pesticide_risk_threshold: float = 0.7  # Lower threshold for pesticide exposure
+    dust_risk_threshold: float = 0.65
+
+
     # Paths
     @property
     def data_dir(self) -> Path:
@@ -88,3 +94,66 @@ def get_settings() -> Settings:
 
 # Convenience exports
 settings = get_settings()
+
+
+# ===============
+# FARMING CALENDAR
+# ===============
+# Seasonal calendar for follow-up scheduling
+# Respects farmer availability throughout the agricultural cycle
+FARMING_CALENDAR = {
+    "sowing": {
+        "months": [6, 7],  # June-July (Kharif sowing)
+        "delay_days": 14,  # 2 weeks delay
+        "description": "Sowing season - farmers are moderately busy"
+    },
+    "growing": {
+        "months": [8, 9, 10],  # August-October (Kharif growing)
+        "delay_days": 7,  # Normal follow-up
+        "description": "Growing season - normal availability"
+    },
+    "harvest": {
+        "months": [11, 12, 1],  # November-January (Kharif harvest + Rabi sowing)
+        "delay_days": 21,  # 3 weeks delay
+        "description": "Harvest season - farmers are very busy"
+    },
+    "off_season": {
+        "months": [2, 3, 4, 5],  # February-May (Post-Rabi, pre-Kharif)
+        "delay_days": 3,  # Faster follow-up
+        "description": "Off-season - farmers have more time"
+    }
+}
+
+
+def get_current_farming_season(month: int = None) -> str:
+    """
+    Get the current farming season based on month.
+
+    Args:
+        month: Month number (1-12). If None, uses current month.
+
+    Returns:
+        Season name: "sowing", "growing", "harvest", or "off_season"
+    """
+    if month is None:
+        from datetime import datetime
+        month = datetime.now().month
+
+    for season_name, season_data in FARMING_CALENDAR.items():
+        if month in season_data["months"]:
+            return season_name
+
+    return "off_season"
+
+
+def get_followup_delay_for_season(season: str) -> int:
+    """
+    Get the recommended follow-up delay (in days) for a farming season.
+
+    Args:
+        season: Season name
+
+    Returns:
+        Number of days to delay follow-up
+    """
+    return FARMING_CALENDAR.get(season, {}).get("delay_days", 7)

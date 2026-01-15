@@ -324,8 +324,87 @@ class CoughClassifier:
                 "develops or symptoms worsen, consult a healthcare provider."
             )
         }
-        
+
         return recommendations.get(classification, ("unknown", "Unable to provide recommendation."))
+
+    def adjust_for_occupational_risk(
+        self,
+        classification: str,
+        confidence: float,
+        severity: str,
+        recommendation: str,
+        occupational_data: Optional[Dict] = None
+    ) -> Tuple[str, str]:
+        """
+        Adjust severity and recommendation based on occupational hazards.
+
+        For farmers exposed to pesticides, dust, or other occupational hazards,
+        respiratory symptoms may indicate more serious conditions.
+
+        Args:
+            classification: Cough classification
+            confidence: Classification confidence
+            severity: Initial severity level
+            recommendation: Initial recommendation
+            occupational_data: Dict with keys: occupation, pesticide_exposure,
+                             dust_exposure, work_environment
+
+        Returns:
+            Tuple of (adjusted_severity, adjusted_recommendation)
+        """
+        if not occupational_data:
+            return severity, recommendation
+
+        is_farmer = occupational_data.get("occupation") in ["farmer", "farm_worker"]
+        pesticide_exposure = occupational_data.get("pesticide_exposure", False)
+        dust_exposure = occupational_data.get("dust_exposure", False)
+
+        if not is_farmer:
+            return severity, recommendation
+
+        # Risk escalation matrix
+        new_severity = severity
+        additional_warnings = []
+
+        # CRITICAL: Pesticide exposure + respiratory symptoms
+        if pesticide_exposure:
+            if classification in ["wet", "whooping"] or (classification == "chronic" and confidence > 0.6):
+                # Escalate to urgent - possible organophosphate poisoning
+                new_severity = "urgent"
+                additional_warnings.append(
+                    "⚠️ URGENT: Pesticide exposure with breathing problems can indicate "
+                    "organophosphate poisoning. Stop using chemicals immediately. "
+                    "See a doctor TODAY. Symptoms may worsen rapidly."
+                )
+            elif classification in ["dry", "normal"]:
+                # Still concerning - upgrade to moderate
+                if severity == "mild":
+                    new_severity = "moderate"
+                additional_warnings.append(
+                    "⚠️ CAUTION: You use pesticides. Respiratory symptoms may indicate "
+                    "chemical irritation. Wear protective masks during spraying. "
+                    "Monitor symptoms closely. See doctor if symptoms worsen."
+                )
+
+        # HIGH: Dust exposure + chronic cough
+        if dust_exposure:
+            if classification == "chronic" or (classification in ["dry", "wet"] and confidence > 0.7):
+                # Possible Farmer's Lung disease
+                if severity == "mild":
+                    new_severity = "moderate"
+                additional_warnings.append(
+                    "⚠️ WARNING: Dust exposure with chronic cough may indicate "
+                    "Farmer's Lung (hypersensitivity pneumonitis). Wear a dust mask "
+                    "when handling grain, hay, or crops. See a pulmonologist for evaluation."
+                )
+
+        # Combine original recommendation with occupational warnings
+        if additional_warnings:
+            adjusted_recommendation = "\n\n".join([recommendation] + additional_warnings)
+        else:
+            adjusted_recommendation = recommendation
+
+        return new_severity, adjusted_recommendation
 
 
 # Singleton instance

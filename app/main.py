@@ -197,6 +197,22 @@ try:
 except ImportError as e:
     logger.warning(f"Health webhooks not loaded: {e}")
 
+# Admin & Background Tasks
+try:
+    from app.api.admin_tasks import router as admin_router
+    app.include_router(admin_router, prefix="/admin", tags=["Admin Tasks"])
+    logger.info("✓ Admin tasks loaded")
+except ImportError as e:
+    logger.warning(f"Admin tasks not loaded: {e}")
+
+# Family Health Dashboard
+try:
+    from app.api.family_endpoints import router as family_router
+    app.include_router(family_router, prefix="/family", tags=["Family Health"])
+    logger.info("✓ Family endpoints loaded")
+except ImportError as e:
+    logger.warning(f"Family endpoints not loaded: {e}")
+
 
 # ==================
 # Static Files

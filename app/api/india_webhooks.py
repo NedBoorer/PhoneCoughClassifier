@@ -202,7 +202,7 @@ async def recording_complete_india(
     From: str = Form(...),
     RecordingUrl: str = Form(None),
 ):
-    """Handle recording completion in selected language with Triage & ASHA support"""
+    """Handle recording completion: Analyze -> DB Save -> Golden Ticket -> Family Loop"""
     query_params = dict(request.query_params)
     language = query_params.get("lang", "en")
     is_asha = query_params.get("is_asha") == "true"
@@ -217,18 +217,14 @@ async def recording_complete_india(
     response = VoiceResponse()
     
     if RecordingUrl:
-        # User feedback: "Please wait..."
+        # User feedback
         wait_msg = "Please wait a moment while I check your health." if language == 'en' else "कृपया अपनी जांच के लिए प्रतीक्षा करें"
         response.say(wait_msg, voice=voice, language=lang_code)
         
-        # We need to perform analysis synchronously for Triage
-        # Logic adapted from run_comprehensive_analysis but awaited
         try:
             # 1. Download
             twilio_service = get_twilio_service()
             local_path = settings.recordings_dir / f"{CallSid}.wav"
-            
-            # Simple synchronous wait for download - might timeout if file huge, but usually coughs are small
             await twilio_service.download_recording(RecordingUrl, str(local_path))
             
             # 2. Analyze
@@ -240,71 +236,122 @@ async def recording_complete_india(
                 enable_depression=settings.enable_depression_screening
             )
             
-            # 3. Triage Risk
-            risk_alert = False
-            risk_msg = ""
+            # 3. Decision Logic & Golden Ticket
+            risk_high = result.overall_risk_level in ["moderate", "high", "severe", "urgent"]
+            referral_code = None
             
-            # Check for high risk
-            # Map risk strings to numeric or just check "severe"/"urgent"
-            high_risks = ["high", "severe", "urgent"]
-            if result.overall_risk_level in high_risks:
-                risk_alert = True
+            import random
+            if risk_high:
+                referral_code = f"REF-{random.randint(1000, 9999)}"
                 
-            # ASHA Reporting
+            # 4. Save to DB (Using manual session management for webhook context)
+            from app.database.database import async_session_maker
+            from app.database.models import CallRecord, ClassificationResult
+            
+            async with async_session_maker() as db:
+                # Create Call Record
+                call_record = CallRecord(
+                    call_sid=CallSid,
+                    caller_number=From,
+                    language=language,
+                    call_status="completed",
+                    recording_url=RecordingUrl
+                )
+                db.add(call_record)
+                await db.flush() # get ID
+                
+                # Create Classification Result
+                class_result = ClassificationResult(
+                    call_id=call_record.id,
+                    classification=result.screenings.get("respiratory", {}).details.get("sound_class", "unknown"),
+                    confidence=result.screenings.get("respiratory", {}).confidence,
+                    probabilities=result.screenings.get("respiratory", {}).probs,
+                    severity=result.overall_risk_level,
+                    recommendation=result.recommendation,
+                    referral_code=referral_code
+                )
+                db.add(class_result)
+                await db.commit()
+            
+            # 5. Reporting (WhatsApp/SMS)
             recipient_number = patient_id if is_asha and patient_id else From
             
-            # Send WhatsApp Report (Idea #3)
-            # Generate Image
             if settings.enable_whatsapp_reports and recipient_number:
                 try:
+                    # Generate Image
                     from app.utils.image_generator import generate_health_card
                     card_path = settings.data_dir / f"card_{CallSid}.png"
                     generate_health_card(result.overall_risk_level, result.recommendation, language, card_path)
                     
-                    # Upload to accessible URL or use a signed URL (here assuming public or using media handling)
-                    # For MVP localserver, we can't expose easily without ngrok. 
-                    # Assuming ngrok is running and settings.base_url is correct:
-                    media_url = f"{settings.base_url}/recordings/card_{CallSid}.png"
+                    media_url = f"{settings.base_url}/data/card_{CallSid}.png"
                     
-                    # Ensure we have an endpoint to serve this file! (Need to add static mount)
-                    
+                    # Format Text
                     report_text = format_sms_result(
                         classification="N/A", confidence=0, recommendation=result.recommendation,
                         language=language, comprehensive_result=result
                     )
                     
+                    if referral_code:
+                        if language == 'en':
+                            report_text += f"\n\n🎫 PRIORITY TICKET: {referral_code}\nShow this to the doctor at PHC."
+                        else:
+                            report_text += f"\n\n🎫 टिकट नंबर: {referral_code}\nडॉक्टर को यह दिखाएं."
+                    
                     twilio_service.send_whatsapp_with_media(recipient_number, report_text, media_url)
                 except Exception as e:
                     logger.error(f"WhatsApp generation failed: {e}")
 
-            # 4. Response Logic
-            if risk_alert and not is_asha:
-                # Tele-Triage Bridge (Idea #4)
-                # If high risk and NOT ASHA (ASHA knows what to do), connect to Doctor.
-                alert_text = (
-                    "Your screening shows potential concerns. "
-                    "Connecting you to a doctor for free consultation now."
-                )
+            # 6. Audio Feedback
+            if risk_high and not is_asha:
+                if referral_code:
+                    ticket_msg = (
+                        f"I have sent a special priority ticket {referral_code} to your phone. "
+                        "Please show this to the doctor."
+                    )
+                    response.say(ticket_msg, voice=voice, language=lang_code)
+                
+                # Tele-Triage Bridge
+                alert_text = "Connecting you to a doctor now."
                 response.say(alert_text, voice=voice, language=lang_code)
                 response.dial(settings.doctor_helpline_number)
                 return twiml_response(response)
                 
             elif is_asha:
-                # ASHA Loop
                 response.say(
-                    f"Screening complete. Risk is {result.overall_risk_level}. Report sent to {recipient_number}.",
+                    f"Screening complete. Risk is {result.overall_risk_level}. Report sent.",
                     voice="Polly.Aditi", language="en-IN"
                 )
-                response.redirect(f"{settings.base_url}/india/voice/asha/menu") # Loop back
+                # Loop back for ASHA
+                response.redirect(f"{settings.base_url}/india/voice/asha/menu")
                 return twiml_response(response)
             
             else:
-                # Standard Goodbye
+                # Normal Result - Start Family Loop
                 response.say(
-                    "Your results are ready and sent to your phone. Stay healthy.",
+                    "Your results are normal. Stay healthy.",
                     voice=voice, language=lang_code
                 )
-
+                
+                response.pause(length=1)
+                
+                # Family Loop Gather
+                gather = Gather(
+                    num_digits=1,
+                    action=f"{settings.base_url}/india/voice/family-decision?lang={language}",
+                    timeout=5
+                )
+                
+                family_msg = (
+                    "Is anyone else in your family coughing? "
+                    "Press 1 to check them now. " if language == 'en' else
+                    "क्या आपके घर में कोई और खांस रहा है? उनकी जांच के लिए 1 दबाएं."
+                )
+                gather.say(family_msg, voice=voice, language=lang_code)
+                response.append(gather)
+                
+                # If no input, hangup
+                response.say("Goodbye.", voice=voice, language=lang_code)
+                
         except Exception as e:
             logger.error(f"Sync analysis failed: {e}")
             response.say("Error in processing. We will text you.", voice=voice, language=lang_code)
@@ -312,6 +359,27 @@ async def recording_complete_india(
         response.say("No recording received.", voice=voice, language=lang_code)
     
     response.hangup()
+    return twiml_response(response)
+
+
+@router.post("/voice/family-decision")
+async def family_decision(
+    request: Request,
+    Digits: str = Form(None)
+):
+    """Handle decision to screen another family member"""
+    query_params = dict(request.query_params)
+    language = query_params.get("lang", "en")
+    
+    response = VoiceResponse()
+    
+    if Digits == '1':
+        # Loop back to recording
+        response.redirect(f"{settings.base_url}/india/voice/start-recording?lang={language}")
+    else:
+        response.say("Namaste. Goodbye.", voice="Polly.Aditi", language="en-IN")
+        response.hangup()
+        
     return twiml_response(response)
 
 
