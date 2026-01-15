@@ -44,9 +44,24 @@ async def lifespan(app: FastAPI):
     try:
         from app.ml.classifier import get_classifier
         classifier = get_classifier()
-        logger.info(f"✓ ML classifier loaded: {classifier.model_type}")
+        logger.info(f"✓ ML cough classifier loaded: {classifier.model_type}")
     except Exception as e:
-        logger.warning(f"ML model not loaded: {e}")
+        logger.warning(f"ML cough model not loaded: {e}")
+    
+    # Load health assessment classifiers
+    try:
+        from app.ml.parkinsons_classifier import get_parkinsons_classifier
+        pd_classifier = get_parkinsons_classifier()
+        logger.info(f"✓ Parkinson's classifier loaded: {pd_classifier.model_type}")
+    except Exception as e:
+        logger.warning(f"Parkinson's classifier not loaded: {e}")
+    
+    try:
+        from app.ml.depression_classifier import get_depression_classifier
+        dep_classifier = get_depression_classifier()
+        logger.info(f"✓ Depression classifier loaded: {dep_classifier.model_type}")
+    except Exception as e:
+        logger.warning(f"Depression classifier not loaded: {e}")
     
     yield
     
@@ -117,9 +132,25 @@ async def health_check():
     try:
         from app.ml.classifier import get_classifier
         classifier = get_classifier()
-        health["components"]["ml_model"] = classifier.model_type
+        health["components"]["cough_classifier"] = classifier.model_type
     except Exception as e:
-        health["components"]["ml_model"] = f"not loaded: {str(e)}"
+        health["components"]["cough_classifier"] = f"not loaded: {str(e)}"
+    
+    # Check Parkinson's classifier
+    try:
+        from app.ml.parkinsons_classifier import get_parkinsons_classifier
+        pd_classifier = get_parkinsons_classifier()
+        health["components"]["parkinsons_classifier"] = pd_classifier.model_type
+    except Exception as e:
+        health["components"]["parkinsons_classifier"] = f"not loaded: {str(e)}"
+    
+    # Check Depression classifier
+    try:
+        from app.ml.depression_classifier import get_depression_classifier
+        dep_classifier = get_depression_classifier()
+        health["components"]["depression_classifier"] = dep_classifier.model_type
+    except Exception as e:
+        health["components"]["depression_classifier"] = f"not loaded: {str(e)}"
     
     # Check Twilio config
     health["components"]["twilio"] = "configured" if settings.twilio_account_sid else "not configured"
@@ -157,6 +188,14 @@ try:
     logger.info("✓ Test endpoints loaded")
 except ImportError as e:
     logger.warning(f"Test endpoints not loaded: {e}")
+
+# Health assessment webhooks (Parkinson's, Depression)
+try:
+    from app.api.health_webhooks import router as health_router
+    app.include_router(health_router, prefix="/health", tags=["Health Assessment"])
+    logger.info("✓ Health assessment webhooks loaded")
+except ImportError as e:
+    logger.warning(f"Health webhooks not loaded: {e}")
 
 
 # ==================

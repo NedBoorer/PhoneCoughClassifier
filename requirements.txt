@@ -46,3 +46,8 @@ colorama==0.4.6
 
 # Dataset Download (Kaggle)
 kaggle==1.6.3
+
+# Voice Biomarkers (optional OpenSMILE)
+# opensmile>=2.5.0  # Uncomment if OpenSMILE needed
+xgboost>=2.0.0
+

@@ -141,3 +141,38 @@ class ModelMetrics(Base):
     
     def __repr__(self):
         return f"<ModelMetrics(model={self.model_name}, acc={self.accuracy:.2f})>"
+
+
+class HealthAssessment(Base):
+    """Health assessment results for Parkinson's and Depression screening"""
+    __tablename__ = "health_assessments"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    
+    # Call identifiers
+    call_sid = Column(String(64), index=True)
+    caller_number = Column(String(20), index=True)
+    
+    # Assessment type
+    assessment_type = Column(String(20), index=True)  # 'parkinsons' or 'depression'
+    
+    # Classification results
+    classification = Column(String(50))  # risk_level for PD, severity_level for depression
+    confidence = Column(Float)  # 0.0 - 1.0
+    risk_level = Column(String(30))  # normalized risk/severity level
+    
+    # Detailed indicators
+    indicators = Column(JSON)  # feature values and indicator levels
+    
+    # Processing metadata
+    method = Column(String(50))  # sklearn, rule_based
+    processing_time_ms = Column(Integer)
+    
+    # Recommendation
+    recommendation = Column(Text)
+    
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    def __repr__(self):
+        return f"<HealthAssessment(id={self.id}, type={self.assessment_type}, result={self.classification})>"

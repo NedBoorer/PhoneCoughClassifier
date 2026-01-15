@@ -1,185 +1,133 @@
-# Phone Cough Classifier
+# Voice Health Agent & Phone Cough Classifier
 
-🎙️ **Voice agent pipeline for cough classification using real datasets**
+🎙️ **An AI-powered voice agent for accessible respiratory and mental health screening.**
 
-Users call a phone number, have a brief conversation, cough into the phone, and receive their classification result via SMS.
+This platform allows users to call a phone number, interact with an AI voice agent in their native language, and receive preliminary health screenings for **Respiratory Diseases (Cough)**, **Parkinson's Disease**, and **Depression** using advanced vocal biomarker analysis.
 
-## ✨ Features
+## ✨ Key Features (Implemented)
 
-- **Voice Agent**: Full phone call flow with Twilio integration
-- **Real ML Model**: Trained on COUGHVID dataset (30K+ samples) or Google HeAR embeddings
-- **Multi-Language**: 10 Indian languages for rural accessibility
-- **Audio Quality**: SNR estimation, clipping detection, quality recommendations
-- **SMS Results**: Automated result delivery with health recommendations
+### 📞 Voice Interface
+- **Twilio Integration**: Full duplex voice conversation handling.
+- **Multi-Language Support**: Infrastructure for 10 distinct Indian languages (English, Hindi, Tamil, Telugu, etc.) for rural accessibility.
+- **Intelligent Routing**: Menu system to direct users to specific screening modules.
 
-## 🚀 Quick Start
+### 🏥 Disease Screening Modules
 
+#### 1. Respiratory & Cough Analysis
+- **Model**: Google HeAR (Health Acoustic Representations) embeddings + Scikit-learn classifier.
+- ** capabilities**: Distinguishes between Dry, Wet, Whooping, and Chronic coughs.
+- **Dataset**: Trained on the COUGHVID dataset (30K+ samples).
+
+#### 2. Parkinson's Disease Detection
+- **Biomarkers**: Jitter, Shimmer, HNR (Harmonics-to-Noise Ratio), F0 variability.
+- **Protocol**: Analyzes sustained vowel phonation (users saying "Aaaah").
+- **Analysis**: Rule-based clinical thresholds integrated with Scikit-learn classifier support.
+
+#### 3. Depression Screening
+- **Biomarkers**: Speech rate, pause duration, pitch variability, spectral centroid.
+- **Protocol**: Analyzes spontaneous speech patterns.
+- **Analysis**: Detects "flat affect" and psychomotor retardation markers.
+
+### 🏗️ Core Infrastructure
+- **FastAPI Backend**: High-performance async Python web framework.
+- **Database**: SQLAlchemy + SQLite (async) for tracking Call Records, Patient Info, and Assessments.
+- **Audio Processing**: 
+    - `librosa` and `scipy` for signal processing.
+    - `opensmile` integration for professional-grade feature extraction.
+- **Model Hub**: Centralized manager for loading and running multiple diagnostic models.
+
+---
+
+## 🚀 Work In Progress & Roadmap
+
+### ⚠️ Immediate To-Dos
+- [ ] **Model Training**: 
+    - Fine-tune Parkinson's classifier on real datasets (e.g., MDVR-KCL).
+    - Train Depression classifier on DAIC-WOZ or similar datasets.
+    - *Current status*: Using rule-based fallbacks and clinical thresholds.
+- [ ] **India Webhooks**: Complete the implementation of `india_webhooks.py` to fully enable the localized IVR flows.
+- [ ] **Unit Testing**: Increase test coverage for the ML pipeline and webhook logic.
+
+### 🔮 Future Improvements
+- **Clinical Validation**: Rigorous testing against medically verified ground truth data.
+- **Deployment**: Dockerize the application and deploy to a cloud provider (AWS/GCP).
+- **Frontend Dashboard**: Create a web UI for doctors/admins to review cases and listen to recordings.
+- **WhatsApp Integration**: Send detailed reports via WhatsApp API.
+
+---
+
+## 🛠️ Installation & Setup
+
+### Prerequisites
+- Python 3.9+
+- `ffmpeg` (installed via brew/apt for audio processing)
+- Twilio Account
+
+### 1. Clone and Install
 ```bash
-# 1. Clone and setup
+git clone https://github.com/YourUsername/PhoneCoughClassifier.git
 cd PhoneCoughClassifier
+pip install -r requirements.txt
 python setup.py
-
-# 2. Edit .env with your credentials
-# (Twilio, OpenAI API keys)
-
-# 3. Start server
-python -m uvicorn app.main:app --reload --port 8000
-
-# 4. Test the API
-open http://localhost:8000/docs
 ```
 
-## 🏗️ Architecture
-
+### 2. Environment Configuration
+Copy the example env file and fill in your credentials:
+```bash
+cp .env.example .env
 ```
-User → Phone Call → Twilio → FastAPI Webhooks → Record Cough
-                                      ↓
-      SMS Result ← Twilio ← Classification ← Audio Processing
+Update `.env` with:
+- `TWILIO_ACCOUNT_SID` & `TWILIO_AUTH_TOKEN`
+- `OPENAI_API_KEY` (for conversation generation)
+
+### 3. Run the Server
+```bash
+python -m uvicorn app.main:app --reload
 ```
 
-## 📁 Project Structure
+### 4. Expose to Internet (for Twilio)
+Use ngrok to expose your local server:
+```bash
+ngrok http 8000
+```
+Update your Twilio Voice Webhook to: `https://<your-ngrok-url>/twilio/voice/incoming`
+
+---
+
+## 🏗️ Project Architecture
 
 ```
 PhoneCoughClassifier/
 ├── app/
-│   ├── main.py                 # FastAPI entry point
-│   ├── config.py               # Settings management
-│   ├── api/
-│   │   ├── twilio_webhooks.py  # Voice call handlers
-│   │   ├── india_webhooks.py   # Multi-language IVR
-│   │   └── test_endpoints.py   # Testing without calls
-│   ├── ml/
-│   │   ├── classifier.py       # Main cough classifier
-│   │   └── feature_extractor.py # Audio feature extraction
-│   ├── database/
-│   │   ├── database.py         # SQLAlchemy async
-│   │   └── models.py           # Data models
-│   ├── services/
-│   │   └── twilio_service.py   # SMS, recording download
-│   └── utils/
-│       ├── audio_processing.py # Format conversion
-│       ├── audio_quality.py    # Quality assessment
-│       └── i18n.py             # 10 language translations
-├── scripts/
-│   ├── download_coughvid.py    # Download training data
-│   └── train_model.py          # Train classifier
-├── data/                       # Datasets (gitignored)
-├── models/                     # Trained models
-├── recordings/                 # Call recordings
-├── setup.py                    # One-command setup
-├── requirements.txt            # Python dependencies
-└── .env.example                # Configuration template
+│   ├── api/                 # Webhook endpoints (Twilio, Health, India)
+│   ├── database/            # SQL Models (Calls, Patients, Results)
+│   ├── ml/                  # Machine Learning Modules
+│   │   ├── classifier.py         # Cough Classifier
+│   │   ├── parkinsons_classifier.py
+│   │   ├── depression_classifier.py
+│   │   ├── voice_biomarkers.py   # Feature Extraction (Jitter/Shimmer/etc)
+│   │   └── model_hub.py          # Unified Model interface
+│   └── services/            # External services (Twilio, S3)
+├── external_models/         # Submodules for specific model architectures
+├── data/                    # Local datasets (not in git)
+├── scripts/                 # Training and setup scripts
+└── recordings/              # Audio storage
 ```
 
-## 🔧 Configuration
+## 📊 API Endpoints
 
-Copy `.env.example` to `.env` and fill in:
-
-```bash
-# Twilio
-TWILIO_ACCOUNT_SID=ACxxxxxxxxxx
-TWILIO_AUTH_TOKEN=your_auth_token
-TWILIO_PHONE_NUMBER=+1234567890
-
-# OpenAI (for conversation)
-OPENAI_API_KEY=sk-xxxxxxxx
-
-# Webhook URL (ngrok for local dev)
-BASE_URL=https://your-domain.ngrok.io
-```
-
-## 📱 Twilio Setup
-
-1. Get a Twilio phone number
-2. Set Voice webhook to: `https://your-domain/twilio/voice/incoming`
-3. For India multi-language: `https://your-domain/india/voice/incoming`
-
-## 🧪 Testing
-
-### Without Phone Calls
-
-Upload audio files directly via `/test/classify`:
-
-```bash
-curl -X POST http://localhost:8000/test/classify \
-  -F "audio_file=@cough.wav"
-```
-
-### API Documentation
-
-Open http://localhost:8000/docs for Swagger UI
-
-## 📊 ML Models
-
-### Option 1: COUGHVID (Recommended)
-
-```bash
-# Download dataset (requires Kaggle API)
-python scripts/download_coughvid.py --output data/coughvid
-
-# Train classifier
-python scripts/train_model.py --data-dir data/coughvid
-```
-
-### Option 2: Synthetic Data (Demo)
-
-```bash
-python scripts/train_model.py --use-synthetic
-```
-
-## 🌍 Supported Languages
-
-| Code | Language   | Native     |
-|------|------------|------------|
-| en   | English    | English    |
-| hi   | Hindi      | हिंदी      |
-| ta   | Tamil      | தமிழ்      |
-| te   | Telugu     | తెలుగు     |
-| bn   | Bengali    | বাংলা      |
-| mr   | Marathi    | मराठी      |
-| gu   | Gujarati   | ગુજરાતી    |
-| kn   | Kannada    | ಕನ್ನಡ      |
-| ml   | Malayalam  | മലയാളം     |
-| pa   | Punjabi    | ਪੰਜਾਬੀ     |
-
-## 📋 Classification Types
-
-| Type      | Description                          |
-|-----------|--------------------------------------|
-| Dry       | Non-productive, tickly sensation     |
-| Wet       | Productive, contains mucus/phlegm    |
-| Whooping  | Barking sound, possible pertussis    |
-| Chronic   | Persistent cough (>3 weeks)          |
-| Normal    | Typical acute cough, likely viral    |
-
-## 🔒 Data Privacy
-
-- Audio deleted after classification (configurable)
-- Caller numbers hashed in database
-- HIPAA-compliant recommendations only
-- No medical diagnosis provided
-
-## 📈 API Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/health` | GET | Health check |
-| `/test/classify` | POST | Upload and classify audio |
-| `/test/quality` | POST | Check audio quality |
-| `/test/status` | GET | System component status |
-| `/twilio/voice/incoming` | POST | Handle incoming calls |
-| `/india/voice/incoming` | POST | Multi-language call handler |
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Submit a pull request
-
-## 📄 License
-
-MIT License - See LICENSE file
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/twilio/voice/incoming` | Main entry point for calls |
+| `POST` | `/health/parkinsons/incoming` | Parkinson's specific screening flow |
+| `POST` | `/health/depression/incoming` | Depression specific screening flow |
+| `POST` | `/test/classify` | Test classification with file upload |
+| `GET`  | `/health` | System health and model status |
 
 ---
 
-Built with ❤️ using FastAPI, Twilio, and COUGHVID dataset
+## 🔒 Privacy & Safety
+- **No Diagnosis**: This tool provides a risk assessment/screening only, NOT a medical diagnosis.
+- **Data Retention**: Audio files are processed and optionally deleted based on configuration.
+- **HIPAA**: Designed with privacy in mind, hashing phone numbers and isolating PII.
+

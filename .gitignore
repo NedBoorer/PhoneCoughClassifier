@@ -46,3 +46,7 @@ htmlcov/
 # Kaggle credentials
 .kaggle/
 kaggle.json
+
+# External AI Models (cloned separately)
+external_models/
+

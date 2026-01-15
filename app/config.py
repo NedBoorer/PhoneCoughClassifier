@@ -34,9 +34,20 @@ class Settings(BaseSettings):
     model_path: str = "./models/cough_classifier.joblib"
     use_hear_embeddings: bool = True
     
+    # Health Assessment Models
+    parkinsons_model_path: str = "./models/parkinsons_classifier.joblib"
+    depression_model_path: str = "./models/depression_classifier.joblib"
+    
     # India Accessibility
     default_language: str = "en"
     enable_multilingual: bool = True
+    
+    # Enhanced Health Screening
+    enable_respiratory_screening: bool = True
+    enable_parkinsons_screening: bool = False  # Opt-in
+    enable_depression_screening: bool = False  # Opt-in
+    screening_model_device: str = "cpu"  # "cpu" or "cuda"
+
     
     # Paths
     @property
