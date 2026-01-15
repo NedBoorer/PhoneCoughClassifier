@@ -46,6 +46,42 @@ We have implemented specific features to bridge the digital divide in rural Indi
 
 ---
 
+## 📱 User Journeys & Workflows
+
+### 1. The "Missed Call" Journey (Zero Cost)
+*   **User Action**: Farmer dials the toll-free number and hangs up after one ring.
+*   **System Response**: Server rejects the call (busy signal) to prevent any charge.
+*   **Callback**: Server immediately triggers an outbound call back to the farmer's number.
+*   **Result**: The health screening happens entirely at the server's expense.
+
+### 2. The Comprehensive Health Screen (Active)
+1.  **Greeting**: "Namaste. I am your health friend..."
+2.  **Language Select**: User picks Hindi (`Press 2`).
+3.  **Symptom Check**: "Do you have chest pain?" (Yes/No via DTMF).
+4.  **Unified Recording**: "Please cough and then count to 10." (Captures Cough + Voice).
+    *   *Background Magic*: Audio is processed in parallel.
+    *   Cough Segment $\to$ **PANNs Model** (Respiratory check).
+    *   Voice Segment $\to$ **SVM** (Parkinson's check) + **Biomarker Analysis** (Depression check).
+5.  **Triage**:
+    *   *Normal*: "You seem healthy." $\to$ **WhatsApp Report** sent with Green Card.
+    *   *High Risk*: "Please hold, connecting you to a doctor." $\to$ Call bridged effectively to `DOCTOR_HELPLINE_NUMBER`.
+
+### 3. ASHA Worker Mode (Community Screening)
+Designed for a health worker visiting a village with one smartphone.
+1.  **Login**: Worker calls and presses `9` at the language menu.
+2.  **Patient Identification**: Worker enters the **Patient's Mobile Number**.
+3.  **Screening**: Worker hands phone to patient for the recording phase.
+4.  **Reporting**: Result is stored against the *Patient's* ID. WhatsApp report is sent to the *Patient's* number (if available).
+5.  **rapid Loop**: Call returns to the main menu immediately, ready to screen the next patient in the queue.
+
+### 4. "Mandi Bol" (Passive Screening)
+1.  **Intent**: User calls for market prices, *not* health.
+2.  **Action**: Calls "Mandi Bol" line.
+3.  **Interaction**: "To get the best price for Onions, describe your crop quality."
+4.  **Passive Scan**: System silently analyzes the *prosody* and *energy* of the voice during the crop description.
+5.  **Intervention**: If (and only if) signs of severe distress are detected, the system gently interrupts: *"I noticed you sound tired... Our Kisan Mitra counselor is here to listen."*
+
+
 ## 🧠 Comprehensive Health Screening Models
 
 The system uses a **Model Hub** architecture to run multiple diagnostic models on a single audio input:
