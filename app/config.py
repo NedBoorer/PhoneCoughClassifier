@@ -44,9 +44,15 @@ class Settings(BaseSettings):
     
     # Enhanced Health Screening
     enable_respiratory_screening: bool = True
-    enable_parkinsons_screening: bool = False  # Opt-in
-    enable_depression_screening: bool = False  # Opt-in
+    enable_parkinsons_screening: bool = True  # Enabled for demo
+    enable_depression_screening: bool = True  # Enabled for demo
     screening_model_device: str = "cpu"  # "cpu" or "cuda"
+
+    # Rural India Accessibility
+    doctor_helpline_number: str = "+910000000000"  # Placeholder eSanjeevani or similar
+    enable_whatsapp_reports: bool = True
+    high_risk_threshold: float = 0.85
+    missed_call_callback_enabled: bool = True
 
     
     # Paths

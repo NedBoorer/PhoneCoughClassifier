@@ -205,6 +205,10 @@ static_path = Path(__file__).parent / "static"
 if static_path.exists():
     app.mount("/static", StaticFiles(directory=str(static_path)), name="static")
 
+# Mount Data for accessible images (WhatsApp)
+app.mount("/data", StaticFiles(directory=str(settings.data_dir)), name="data")
+app.mount("/recordings", StaticFiles(directory=str(settings.recordings_dir)), name="recordings")
+
 
 if __name__ == "__main__":
     import uvicorn

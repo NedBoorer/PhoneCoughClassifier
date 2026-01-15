@@ -577,6 +577,12 @@ class ModelHub:
             recommendation=" ".join(recommendations) if recommendations else "All screenings appear normal."
         )
 
+    async def run_full_analysis_async(self, *args, **kwargs) -> ComprehensiveHealthResult:
+        """Async wrapper for run_full_analysis"""
+        import asyncio
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, lambda: self.run_full_analysis(*args, **kwargs))
+
 
 # Singleton instance
 _model_hub = None

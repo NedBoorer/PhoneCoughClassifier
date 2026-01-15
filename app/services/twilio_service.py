@@ -105,6 +105,57 @@ class TwilioService:
             logger.error(f"Failed to download recording: {e}")
             return False
     
+    def send_whatsapp_with_media(
+        self,
+        to: str,
+        message: str,
+        media_url: str
+    ) -> bool:
+        """
+        Send WhatsApp message with media (image).
+        Requires Twilio WhatsApp sender to be configured.
+        """
+        try:
+            # Twilio WhatsApp numbers must be prefixed with 'whatsapp:'
+            if not to.startswith('whatsapp:'):
+                to = f"whatsapp:{to}"
+            
+            from_number = settings.twilio_phone_number
+            if not from_number.startswith('whatsapp:'):
+                from_number = f"whatsapp:{from_number}"
+                
+            result = self.client.messages.create(
+                body=message,
+                from_=from_number,
+                to=to,
+                media_url=[media_url]
+            )
+            logger.info(f"WhatsApp sent to {to}: SID={result.sid}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to send WhatsApp to {to}: {e}")
+            return False
+
+    def trigger_outbound_call(
+        self,
+        to: str,
+        callback_url: str
+    ) -> bool:
+        """
+        Initiate an outbound call (callback).
+        """
+        try:
+            call = self.client.calls.create(
+                to=to,
+                from_=settings.twilio_phone_number,
+                url=callback_url
+            )
+            logger.info(f"Outbound call initiated to {to}: SID={call.sid}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to call {to}: {e}")
+            return False
+
     def validate_webhook_signature(
         self,
         signature: str,
@@ -127,21 +178,56 @@ def format_sms_result(
     classification: str,
     confidence: float,
     recommendation: str,
-    language: str = "en"
+    language: str = "en",
+    comprehensive_result: Optional['ComprehensiveHealthResult'] = None
 ) -> str:
     """
     Format classification result as SMS message.
-    
-    Args:
-        classification: Cough classification type
-        confidence: Confidence score (0-1)
-        recommendation: Health recommendation
-        language: Language code
-        
-    Returns:
-        Formatted SMS message
     """
-    # Classification display names
+    if comprehensive_result:
+        # Detailed multi-disease report
+        
+        # 1. Summary
+        risk_emoji = {
+            "low": "🟢", "normal": "🟢", 
+            "mild": "🟡", "moderate": "🟠", 
+            "high": "🔴", "severe": "🔴", "urgent": "🚨"
+        }
+        emoji = risk_emoji.get(comprehensive_result.overall_risk_level, "⚪")
+        
+        message = f"🩺 Voice Health Report {emoji}\n\n"
+        
+        # 2. Respiratory
+        resp = comprehensive_result.screenings.get("respiratory")
+        if resp and resp.detected:
+            message += f"🫁 Respiratory: {resp.severity.upper()} risk\n"
+            message += f"   Indication: {resp.details.get('sound_class', 'unknown')}\n"
+        else:
+            message += "🫁 Respiratory: Normal\n"
+            
+        # 3. Parkinson's (if enabled/run)
+        pd = comprehensive_result.screenings.get("parkinsons")
+        if pd:
+            if pd.detected:
+                 message += f"🧠 Voice Tremor: {pd.severity.upper()} risk\n"
+            else:
+                 message += "🧠 Voice Tremor: Normal\n"
+
+        # 4. Depression (if enabled/run)
+        dep = comprehensive_result.screenings.get("depression")
+        if dep:
+            if dep.detected:
+                message += f"🎭 Mood Indicators: {dep.severity.upper()} risk\n"
+            else:
+                message += "🎭 Mood Indicators: Normal\n"
+        
+        # 5. Recommendation
+        message += f"\n💡 {comprehensive_result.recommendation}\n"
+        message += "\nThis is an AI screening. Consult a doctor for diagnosis."
+        
+        return message
+
+    # Fallback to simple single-classifier format (existing logic)
     class_names = {
         "en": {
             "dry": "Dry (Non-productive)",

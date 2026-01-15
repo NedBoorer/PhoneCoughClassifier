@@ -51,3 +51,6 @@ kaggle==1.6.3
 # opensmile>=2.5.0  # Uncomment if OpenSMILE needed
 xgboost>=2.0.0
 
+# Image Generation (WhatsApp Cards)
+Pillow==10.2.0
+
