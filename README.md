@@ -34,6 +34,16 @@ We have implemented specific features to bridge the digital divide in rural Indi
 *   **Problem**: Clinical questions fail to get accurate answers.
 *   **Solution**: Replaced checks like *"Do you have dyspnea?"* with *"Do you feel like a heavy stone is on your chest when you walk?"* utilizing culturally aware prompts.
 
+### 6. Kisan Manas (Farmer Mind) & Mandi Bol
+*   **Problem**: Farmers are reluctant to seek help for mental health due to stigma ("log kya kahenge").
+*   **Solution**: **Passive Screening** hidden inside a routine utility service (Market Prices).
+*   **Mechanism**: 
+    1.  Farmer calls "Mandi Bol" to check onion/tomato prices.
+    2.  System asks: *"To give you the best price, describe your crop quality for 10 seconds."*
+    3.  While the farmer speaks, the **Depression Classifier** analyzes voice biomarkers (monotone, low energy, jitter).
+    4.  **Intervention**: If distress is detected, the call gently pivots: *"I noticed you sound tired... Our Kisan Mitra counselor is here to listen."*
+    5.  User can press 1 to connect to a counselor immediately.
+
 ---
 
 ## 🧠 Comprehensive Health Screening Models
@@ -130,6 +140,7 @@ python -m uvicorn app.main:app --reload
 | `POST` | `/india/voice/missed-call` | Reject & Callback logic. |
 | `POST` | `/india/voice/asha/menu` | Interface for Health Workers. |
 | `POST` | `/india/voice/recording-complete` | Logic for analysis, triage, and reporting. |
+| `POST` | `/india/voice/market/menu` | Mandi Bol: Market Prices & Passive Screen |
 
 ### Testing & Models
 | Endpoint | Description |
@@ -164,109 +175,5 @@ PhoneCoughClassifier/
 - **HIPAA**: Audio is processed locally and can be configured to delete immediately after analysis.
 - **Data Safety**: Patient IDs in ASHA mode are used only for reporting and not stored permanently on device.
 
-🎙️ **An AI-powered voice agent for accessible respiratory and mental health screening.**
 
-This platform allows users to call a phone number, interact with an AI voice agent in their native language, and receive preliminary health screenings for **Respiratory Diseases (COPD/Asthma)**, **Parkinson's Disease**, and **Depression** using advanced vocal biomarker analysis and prebuilt AI models.
-
-## ✨ Key Features
-
-### 🏥 Comprehensive Health Screening
-Now integrates production-ready AI models to detect:
-
-1.  **Respitory Health (PANNs Model)**
-    *   **Source**: Integrated from [ilyassmoummad/scl_icbhi2017](https://github.com/ilyassmoummad/scl_icbhi2017)
-    *   **Detects**: Crackles, Wheezes (Indicators for COPD, Asthma, Pneumonia)
-    *   **Model**: CNN6 trained on ICBHI dataset.
-
-2.  **Parkinson's Disease Detection**
-    *   **Source**: Integrated from [AbderrezzakMrch/Parkinson-s-Disease-Voice-Detector](https://github.com/AbderrezzakMrch/Parkinson-s-Disease-Voice-Detector)
-    *   **Detects**: Vocal tremors and biomarkers (Jitter, Shimmer, HNR, PPE).
-    *   **Model**: Support Vector Machine (SVM) on voice features.
-
-3.  **Depression Screening**
-    *   **Source**: Integrated from [kykiefer/depression-detect](https://github.com/kykiefer/depression-detect)
-    *   **Detects**: Flat affect, psychomotor retardation features (Pitch variability, Energy, Speaking Rate).
-    *   **Method**: Acoustic feature extraction.
-
-### 📞 Smart Voice Interface
-- **Combined Screening Flow**: Users provide a single audio sample (cough + speech) to screen for ALL conditions simultaneously.
-- **Background Processing**: Heavy AI analysis runs in the background while the user answers a breathing questionnaire, ensuring zero latency.
-- **Multilingual Support**: Infrastructure for 10 Indian languages.
-
-### 🏗️ Core Infrastructure
-- **FastAPI Backend**: High-performance async Python web framework.
-- **Model Hub**: Centralized manager that loads and coordinates multiple AI models (`app/ml/model_hub.py`).
-- **Feature Extraction**: Professional-grade acoustic feature extraction using `librosa` and `opensmile` fallback.
-
----
-
-## 🛠️ Installation & Setup
-
-### Prerequisites
-- Python 3.9+
-- `ffmpeg` (installed via brew/apt for audio processing)
-- Twilio Account
-
-### 1. Clone and Install
-```bash
-git clone https://github.com/YourUsername/PhoneCoughClassifier.git
-cd PhoneCoughClassifier
-pip install -r requirements.txt
-```
-
-### 2. External Models
-The project relies on external model weights. The setup script (or manual download) retrieves these:
-- **PANNs**: CNN6 weights (~22MB)
-- **Parkinson's**: Pre-trained SVM model
-
-### 3. Run the Server
-```bash
-python -m uvicorn app.main:app --reload
-```
-
-### 4. Expose to Internet (for Twilio)
-Use ngrok to expose your local server:
-```bash
-ngrok http 8000
-```
-Update your Twilio Voice Webhook to: `https://<your-ngrok-url>/twilio/voice/incoming`
-
----
-
-## 📊 API Endpoints
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/twilio/voice/incoming` | Main entry point for phone calls |
-| `POST` | `/test/analyze-full` | **Comprehensive Check**: Runs all 3 models on an uploaded file |
-| `POST` | `/test/respiratory-screen` | Test PANNs respiratory model |
-| `POST` | `/test/parkinsons-screen` | Test Parkinson's detector |
-| `POST` | `/test/depression-screen` | Test Depression screener |
-| `POST` | `/test/voice-biomarkers` | Extract raw biomarkers (Jitter, Shimmer, etc) |
-| `GET`  | `/test/screening-models` | Check status of loaded models |
-
----
-
-## 🏗️ Project Architecture
-
-```
-PhoneCoughClassifier/
-├── app/
-│   ├── api/                 # Webhooks & Test Endpoints
-│   ├── ml/                  # Machine Learning Core
-│   │   ├── model_hub.py          # Unified Interface for all models
-│   │   ├── voice_biomarkers.py   # Feature Extraction
-│   │   └── classifier.py         # Legacy Cough Classifier
-│   ├── services/            # Twilio & IO Services
-│   └── database/            # SQLite Storage
-├── external_models/         # Cloned AI Repositories (PANNs, Parkinson's, etc.)
-└── recordings/              # Audio storage
-```
-
----
-
-## 🔒 Privacy & Safety
-- **No Diagnosis**: This tool provides a risk assessment/screening only, NOT a medical diagnosis.
-- **Data Retention**: Audio files are processed and deleted.
-- **Disclaimer**: Always consult a medical professional for serious symptoms.
 
