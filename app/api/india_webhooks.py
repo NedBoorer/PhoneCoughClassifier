@@ -12,6 +12,7 @@ from app.utils.i18n import get_text, get_language_config, LANGUAGES
 from app.services.twilio_service import get_twilio_service, format_sms_result
 from app.api.twilio_webhooks import run_comprehensive_analysis
 from app.ml.model_hub import get_model_hub
+from app.services.kisan_mitra_service import get_kisan_mitra_service
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +116,177 @@ async def incoming_call_india(
     
     # Default to English if no input
     response.redirect(f"{settings.base_url}/india/voice/start-recording?lang=en")
+    
+    return twiml_response(response)
+
+
+@router.post("/voice/market/menu")
+async def market_menu():
+    """
+    Mandi Bol: Market Price Check Menu
+    Entry point for checking prices.
+    """
+    response = VoiceResponse()
+    
+    gather = Gather(
+        num_digits=1,
+        action=f"{settings.base_url}/india/voice/market/selection",
+        timeout=10
+    )
+    
+    # "Namaste. Welcome to Mandi Bol. For Onion prices press 1..."
+    gather.say(
+        "Namaste. Welcome to Mandi Bol. "
+        "For Onion prices, press 1. "
+        "For Tomato prices, press 2. "
+        "For Potato prices, press 3. "
+        "For Wheat prices, press 4. "
+        "For Rice prices, press 5. ",
+        voice="Polly.Aditi",
+        language="en-IN"
+    )
+    
+    response.append(gather)
+    response.say("I did not receive an input. Goodbye.", voice="Polly.Aditi")
+    response.hangup()
+    
+    return twiml_response(response)
+
+
+@router.post("/voice/market/selection")
+async def market_selection(Digits: str = Form(None)):
+    """Handle commodity selection and prompt for voice sample (Passive Screen)"""
+    response = VoiceResponse()
+    
+    commodity_map = {
+        '1': 'onion', '2': 'tomato', '3': 'potato', '4': 'wheat', '5': 'rice'
+    }
+    
+    commodity = commodity_map.get(Digits, 'onion')
+    
+    # "To get the best price for [Crop], please describe your crop quality after the beep."
+    # This ensures we get a speech sample for depression screening.
+    response.say(
+        f"You selected {commodity}. "
+        "To give you the accurate price, please describe your crop quality in a few sentences after the beep. "
+        "Speak for at least 10 seconds.",
+        voice="Polly.Aditi",
+        language="en-IN"
+    )
+    
+    response.record(
+        max_length=15,
+        timeout=3,
+        play_beep=True,
+        trim="trim-silence",
+        action=f"{settings.base_url}/india/voice/market/analyze?commodity={commodity}",
+        recording_status_callback=f"{settings.base_url}/twilio/voice/recording-status"
+    )
+    
+    return twiml_response(response)
+
+
+@router.post("/voice/market/analyze")
+async def market_analyze(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    CallSid: str = Form(...),
+    RecordingUrl: str = Form(None)
+):
+    """
+    Analyze voice for Depression (Passive) -> Market Price (Active)
+    """
+    commodity = request.query_params.get("commodity", "onion")
+    
+    response = VoiceResponse()
+    
+    if RecordingUrl:
+        response.say("Please wait while we check the market data.", voice="Polly.Aditi")
+        
+        # 1. Download & Analyze (Synchronous for MVP flow decision, though usually async is better)
+        # We need the result NOW to decide on intervention.
+        try:
+            twilio_service = get_twilio_service()
+            local_path = settings.recordings_dir / f"{CallSid}_market.wav"
+            await twilio_service.download_recording(RecordingUrl, str(local_path))
+            
+            hub = get_model_hub()
+            # Enable Depression Screening!
+            result = await hub.run_full_analysis_async(
+                str(local_path),
+                enable_respiratory=False,
+                enable_parkinsons=False,
+                enable_depression=True 
+            )
+            
+            # 2. Check Intervention
+            kisan_service = get_kisan_mitra_service()
+            should_intervene, reason = kisan_service.check_intervention_needed(result.screenings.get("depression"))
+            
+            if should_intervene:
+                # Redirect to Intervention Flow
+                response.redirect(f"{settings.base_url}/india/voice/kisan-mitra/handover?reason={reason}")
+                return twiml_response(response)
+            
+            # 3. Normal Market Flow
+            price_info = kisan_service.get_market_price(commodity)
+            response.say(price_info, voice="Polly.Aditi", language="en-IN")
+            
+            response.say("Thank you for using Mandi Bol. Jai Hind.", voice="Polly.Aditi")
+            response.hangup()
+            
+        except Exception as e:
+            logger.error(f"Market analysis failed: {e}")
+            response.say("Error checking prices. Please try again later.", voice="Polly.Aditi")
+            response.hangup()
+    else:
+        response.say("No audio received.", voice="Polly.Aditi")
+        response.hangup()
+
+    return twiml_response(response)
+
+
+@router.post("/voice/kisan-mitra/handover")
+async def kisan_mitra_handover(request: Request):
+    """
+    Kisan Mitra Intervention Flow
+    """
+    reason = request.query_params.get("reason", "")
+    kisan_service = get_kisan_mitra_service()
+    
+    # Get empathetic script
+    script = kisan_service.get_empathetic_message(reason, language="en")
+    
+    response = VoiceResponse()
+    
+    gather = Gather(
+        num_digits=1,
+        action=f"{settings.base_url}/india/voice/kisan-mitra/connect",
+        timeout=10
+    )
+    gather.say(script, voice="Polly.Aditi", language="en-IN")
+    
+    response.append(gather)
+    
+    # If no input, just hangup softly or go back to market? 
+    # Let's say goodbye softly.
+    response.say("Take care of yourself. Goodbye.", voice="Polly.Aditi")
+    response.hangup()
+    
+    return twiml_response(response)
+
+
+@router.post("/voice/kisan-mitra/connect")
+async def kisan_mitra_connect(Digits: str = Form(None)):
+    """Connect to Counselor"""
+    response = VoiceResponse()
+    
+    if Digits == '1':
+        response.say("Connecting you to a Kisan Mitra counselor now...", voice="Polly.Aditi")
+        # Mock number for counselor
+        response.dial("1800-180-1551") # Kisan Call Center
+    else:
+        response.say("No problem. Stay strong. Goodbye.", voice="Polly.Aditi")
     
     return twiml_response(response)
 
