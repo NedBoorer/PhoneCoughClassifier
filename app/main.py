@@ -231,6 +231,15 @@ if settings.enable_voice_agent:
     except ImportError as e:
         logger.warning(f"Voice agent webhooks not loaded: {e}")
 
+# WhatsApp Bot
+if settings.enable_whatsapp_bot:
+    try:
+        from app.api.whatsapp_webhooks import router as whatsapp_router
+        app.include_router(whatsapp_router, prefix="/whatsapp", tags=["WhatsApp"])
+        logger.info("✓ WhatsApp webhooks loaded")
+    except ImportError as e:
+        logger.warning(f"WhatsApp webhooks not loaded: {e}")
+
 
 # ==================
 # Static Files

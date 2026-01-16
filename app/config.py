@@ -63,6 +63,8 @@ class Settings(BaseSettings):
 
     # WhatsApp Configuration
     twilio_whatsapp_from: str = "whatsapp:+14155238886"  # Twilio sandbox number
+    enable_whatsapp_bot: bool = True
+    whatsapp_welcome_message: str = "🩺 Welcome to Voice Health! I can check your cough for health issues.\n\nPlease reply with your preferred language:\n\n1. English\n2. Hindi"
     
     # ML Thresholds
     confidence_threshold: float = 0.7

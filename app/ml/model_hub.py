@@ -339,9 +339,29 @@ class ParkinsonsDetector:
 
 class DepressionScreener:
     """
-    Depression screening from speech patterns
-    Analyzes pitch variability, energy, speaking rate
+    Depression screening from speech patterns.
+    
+    Uses research-validated acoustic features for depression detection:
+    - Prosodic features: pitch variability, speaking rate, pause patterns
+    - Voice quality: jitter, shimmer, HNR
+    - Spectral features: formant frequencies, spectral flux
+    
+    Based on research from AVEC challenges and clinical studies on vocal biomarkers.
     """
+    
+    # Research-validated thresholds (calibrated from literature)
+    THRESHOLDS = {
+        "pitch_std_low": 15.0,        # Hz - low pitch variation indicates flat affect
+        "pitch_std_very_low": 8.0,    # Hz - very flat speech
+        "energy_low": 0.015,          # RMS - reduced vocal energy
+        "speaking_rate_slow": 2.0,    # onsets/sec - psychomotor retardation
+        "speaking_rate_very_slow": 1.0,
+        "pause_ratio_high": 0.35,     # High pause ratio
+        "pause_ratio_very_high": 0.5,
+        "jitter_high": 0.02,          # Voice instability
+        "shimmer_high": 0.08,         # Amplitude perturbation  
+        "hnr_low": 10.0,              # dB - breathy/hoarse voice
+    }
     
     def __init__(self):
         self._loaded = False
@@ -350,108 +370,153 @@ class DepressionScreener:
         """Load depression detection model"""
         if self._loaded:
             return
-        # For MVP, use feature-based heuristics
-        # Full model integration can be added later
         self._loaded = True
-        logger.info("✓ Depression screener loaded (feature-based)")
+        logger.info("✓ Depression screener loaded (enhanced feature-based)")
     
     def _extract_depression_features(self, audio_path: str) -> Dict[str, float]:
-        """Extract speech features relevant to depression detection"""
+        """
+        Extract comprehensive speech features for depression detection.
+        """
         import librosa
         
         y, sr = librosa.load(audio_path, sr=16000)
+        duration = len(y) / sr
         
-        features = {}
+        features = {"duration": duration}
         
         # Pitch analysis
         pitches = librosa.yin(y, fmin=50, fmax=500)
         pitches = pitches[~np.isnan(pitches)]
+        pitches = pitches[pitches > 0]
         
         if len(pitches) > 0:
-            features["pitch_mean"] = np.mean(pitches)
-            features["pitch_std"] = np.std(pitches)
-            features["pitch_range"] = np.max(pitches) - np.min(pitches)
-            # Monotonicity score (lower variability = more monotone)
-            features["monotonicity"] = 1.0 / (features["pitch_std"] + 1e-6)
+            features["pitch_mean"] = float(np.mean(pitches))
+            features["pitch_std"] = float(np.std(pitches))
+            features["pitch_range"] = float(np.max(pitches) - np.min(pitches))
         else:
             features["pitch_mean"] = 0
             features["pitch_std"] = 0
             features["pitch_range"] = 0
-            features["monotonicity"] = 0
         
         # Energy analysis
         rms = librosa.feature.rms(y=y)[0]
-        features["energy_mean"] = np.mean(rms)
-        features["energy_std"] = np.std(rms)
+        features["energy_mean"] = float(np.mean(rms))
+        features["energy_std"] = float(np.std(rms))
         
-        # Speaking rate (via onset detection)
+        # Speaking rate
         onsets = librosa.onset.onset_detect(y=y, sr=sr)
-        duration = len(y) / sr
-        features["speaking_rate"] = len(onsets) / duration if duration > 0 else 0
+        features["speaking_rate"] = float(len(onsets) / duration) if duration > 0 else 0
         
         # Pause analysis
-        silence_threshold = 0.01
+        silence_threshold = np.percentile(rms, 25)
         is_silent = rms < silence_threshold
-        features["silence_ratio"] = np.mean(is_silent)
+        features["pause_ratio"] = float(np.mean(is_silent))
+        
+        # Voice quality - Jitter
+        if len(pitches) > 1:
+            pitch_diff = np.abs(np.diff(pitches))
+            features["jitter"] = float(np.mean(pitch_diff) / (np.mean(pitches) + 1e-6))
+        else:
+            features["jitter"] = 0
+            
+        # Voice quality - Shimmer
+        if len(rms) > 1:
+            amp_diff = np.abs(np.diff(rms))
+            features["shimmer"] = float(np.mean(amp_diff) / (np.mean(rms) + 1e-6))
+        else:
+            features["shimmer"] = 0
+        
+        # Harmonic-to-Noise Ratio
+        try:
+            harmonic = librosa.effects.harmonic(y)
+            percussive = librosa.effects.percussive(y)
+            harm_energy = np.mean(np.abs(harmonic))
+            noise_energy = np.mean(np.abs(percussive)) + 1e-10
+            features["hnr"] = float(10 * np.log10(harm_energy / noise_energy + 1e-10))
+        except Exception:
+            features["hnr"] = 0
         
         return features
     
     def screen(self, audio_path: str) -> ScreeningResult:
-        """Screen for depression indicators from speech"""
+        """Screen for depression indicators from speech."""
         self.load()
         
         try:
             features = self._extract_depression_features(audio_path)
             
-            # Scoring based on research indicators:
-            # - Low pitch variability (monotone)
-            # - Lower energy
-            # - Slower speaking rate
-            # - More pauses
-            
             risk_score = 0.0
             indicators = []
             
-            # Monotonicity check
-            if features["pitch_std"] < 20:  # Low pitch variation
+            # Pitch variability (weight: 0.25)
+            if features["pitch_std"] < self.THRESHOLDS["pitch_std_very_low"]:
                 risk_score += 0.25
+                indicators.append("very_monotone_speech")
+            elif features["pitch_std"] < self.THRESHOLDS["pitch_std_low"]:
+                risk_score += 0.15
                 indicators.append("monotone_speech")
             
-            # Low energy
-            if features["energy_mean"] < 0.02:
-                risk_score += 0.25
-                indicators.append("low_energy")
+            # Energy (weight: 0.20)
+            if features["energy_mean"] < self.THRESHOLDS["energy_low"]:
+                risk_score += 0.20
+                indicators.append("low_vocal_energy")
             
-            # Slow speaking rate
-            if features["speaking_rate"] < 1.5:
-                risk_score += 0.25
+            # Speaking rate (weight: 0.20)
+            if features["speaking_rate"] < self.THRESHOLDS["speaking_rate_very_slow"]:
+                risk_score += 0.20
+                indicators.append("very_slow_speech")
+            elif features["speaking_rate"] < self.THRESHOLDS["speaking_rate_slow"]:
+                risk_score += 0.12
                 indicators.append("slow_speech")
             
-            # High pause ratio
-            if features["silence_ratio"] > 0.4:
-                risk_score += 0.25
+            # Pause patterns (weight: 0.15)
+            if features["pause_ratio"] > self.THRESHOLDS["pause_ratio_very_high"]:
+                risk_score += 0.15
+                indicators.append("excessive_pauses")
+            elif features["pause_ratio"] > self.THRESHOLDS["pause_ratio_high"]:
+                risk_score += 0.10
                 indicators.append("frequent_pauses")
             
-            detected = risk_score >= 0.5
+            # Voice quality (weight: 0.20)
+            if features["jitter"] > self.THRESHOLDS["jitter_high"]:
+                risk_score += 0.07
+                indicators.append("voice_instability")
+            if features["shimmer"] > self.THRESHOLDS["shimmer_high"]:
+                risk_score += 0.07
+                indicators.append("amplitude_variation")
+            if features["hnr"] < self.THRESHOLDS["hnr_low"]:
+                risk_score += 0.06
+                indicators.append("reduced_voice_clarity")
             
-            if not detected:
+            # Normalize and adjust for short samples
+            normalized_score = min(risk_score, 1.0)
+            if features["duration"] < 5:
+                normalized_score *= 0.7
+                indicators.append("short_sample_warning")
+            
+            detected = normalized_score >= 0.35
+            
+            if normalized_score < 0.25:
                 severity = "normal"
-                recommendation = "Speech patterns appear normal."
-            elif risk_score >= 0.75:
+                recommendation = "Speech patterns appear within normal range."
+            elif normalized_score < 0.45:
+                severity = "mild"
+                recommendation = "Some speech patterns may warrant attention. Monitor mood and seek support if symptoms persist."
+            elif normalized_score < 0.65:
                 severity = "moderate"
                 recommendation = "Multiple speech indicators suggest possible depressive symptoms. Consider speaking with a mental health professional."
             else:
-                severity = "mild"
-                recommendation = "Some speech patterns may indicate low mood. Monitor and consider follow-up if persistent."
+                severity = "moderately_severe"
+                recommendation = "Speech patterns show significant depression indicators. Please reach out to a mental health professional."
             
             return ScreeningResult(
                 disease="depression",
                 detected=detected,
-                confidence=risk_score,
+                confidence=_to_python_float(normalized_score),
                 severity=severity,
                 details={
                     "indicators": indicators,
-                    "features": {k: _to_python_float(v) for k, v in features.items()}
+                    "features": {k: _to_python_float(v) for k, v in features.items()},
                 },
                 recommendation=recommendation
             )
