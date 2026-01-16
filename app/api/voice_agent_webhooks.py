@@ -166,6 +166,13 @@ async def process_speech(
         _call_states.pop(CallSid, None)
         return twiml_response(response)
     
+    # Special handling for ASHA handoff
+    if agent_response.next_step == ConversationStep.ASHA_HANDOFF:
+        response.say(agent_response.message, voice=voice, language=lang_code)
+        # Redirect to ASHA menu or Human Handoff flow
+        response.redirect(f"{settings.base_url}/india/voice/asha/menu")
+        return twiml_response(response)
+    
     # Normal response - continue conversation
     response.say(agent_response.message, voice=voice, language=lang_code)
     

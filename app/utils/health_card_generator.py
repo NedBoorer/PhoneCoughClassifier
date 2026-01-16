@@ -35,8 +35,16 @@ def generate_health_card(result, language: str = "en") -> Optional[str]:
         # Respiratory
         resp = result.screenings.get("respiratory")
         if resp:
-            # TODO: Get translated text
-            status = "Detected" if resp.detected else "Normal"
+            from app.utils.i18n import get_text
+            status_key = "status_detected" if resp.detected else "status_normal"
+            status = get_text(status_key, language)
+            
+            # Label for Respiratory
+            # We don't have a specific label key for "Respiratory" in the provided i18n, 
+            # assuming "Respiratory: {status}" format, but let's try to localize the label if possible.
+            # For now, we will keep "Respiratory" english distinct or add a key if needed. 
+            # Looking at i18n.py, we don't have "Respiratory" key.
+            # Let's just localize the status part effectively.
             details.append(f"Respiratory: {status}")
             
         # Recommendation

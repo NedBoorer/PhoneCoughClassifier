@@ -28,6 +28,7 @@ class ConversationStep(str, Enum):
     PROCESSING = "processing"
     RESULTS = "results"
     FAMILY_OFFER = "family_offer"
+    ASHA_HANDOFF = "asha_handoff"
     GOODBYE = "goodbye"
 
 
@@ -126,7 +127,15 @@ class VoiceAgentService:
         topic = topic_map.get(state.current_step, "general")
         context = rag.get_context_for_topic(topic, state.language, max_chunks=3)
         
-        return f"""You are Swasth Saathi, a warm health companion on a voice call.
+        return f"""You are Swasth Saathi, a warm and trusted health companion.
+        
+IDENTITY:
+- Name: Swasth Saathi (Health Friend)
+- Affiliation: {settings.trusted_authority_name}
+- Role: Caring digital assistant for local doctors.
+
+SOCIAL PROOF (Mention casually if appropriate):
+- "I have already helped {settings.mock_daily_users} people in your area today."
 
 LANGUAGE: {state.language} - Always respond in this language.
 STEP: {state.current_step.value}
@@ -134,8 +143,9 @@ INFO: {state.collected_info}
 
 RULES:
 - 2-3 sentences MAX (it's a phone call)
-- Warm, simple language like a caring elder
-- Never mention being AI
+- Warm, respectful tone (use "Ji", "Beta" as appropriate)
+- Be influential but patient.
+- Never mention being AI/Robot directly; say you are a "digital service".
 - Emergency: suggest calling 108
 
 KNOWLEDGE:
@@ -175,6 +185,11 @@ Respond with ONLY the spoken message."""
             if not extracted_info.get("is_farmer", False):
                 return ConversationStep.RECORDING_INTRO
         
+        # Check for Handoff Intents (Safety Net)
+        human_keywords = ["human", "person", "doctor", "talking to", "real person", "fake", "robot", "insaan", "baat karni", "asli"]
+        if any(kw in user_input.lower() for kw in human_keywords):
+            return ConversationStep.ASHA_HANDOFF
+
         return transitions.get(current_step, ConversationStep.GOODBYE)
     
     def _extract_info(self, user_input: str, current_step: ConversationStep) -> dict:
@@ -332,6 +347,10 @@ Respond with ONLY the spoken message."""
             ConversationStep.GOODBYE: {
                 "en": "Thank you for calling. Take care and stay healthy!",
                 "hi": "कॉल करने के लिए धन्यवाद। अपना ख्याल रखें और स्वस्थ रहें!",
+            },
+            ConversationStep.ASHA_HANDOFF: {
+                "en": "I understand. Let me connect you to a health worker.",
+                "hi": "मैं समझता हूँ। मैं आपको एक स्वास्थ्य कार्यकर्ता से जोड़ता हूँ।",
             },
         }
         

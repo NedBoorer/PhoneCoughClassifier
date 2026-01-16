@@ -135,6 +135,12 @@ async def incoming_call(request: Request):
     Step 1: Welcome & Combined Recording
     """
     response = VoiceResponse()
+
+    # Check if voice agent is enabled (Conversational Agent Mode)
+    if settings.enable_voice_agent:
+        logger.info("Redirecting incoming call to Voice Agent")
+        response.redirect(f"{settings.base_url}/voice-agent/start")
+        return twiml_response(response)
     
     response.say(
         "Welcome to the Voice Health Screening. "

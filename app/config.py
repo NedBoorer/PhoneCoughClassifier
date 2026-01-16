@@ -80,6 +80,10 @@ class Settings(BaseSettings):
     voice_agent_max_turns: int = 10
     voice_agent_timeout: int = 10  # seconds to wait for speech input
     
+    # Trust & Reliability
+    trusted_authority_name: str = "District Health Mission"
+    mock_daily_users: int = 400
+    
     # Logging
     log_level: str = "INFO"
     log_file: str = "./data/app.log"

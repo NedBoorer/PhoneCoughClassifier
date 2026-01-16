@@ -14,6 +14,8 @@ from app.services.twilio_service import get_twilio_service, format_sms_result
 from app.api.twilio_webhooks import run_comprehensive_analysis
 from app.ml.model_hub import get_model_hub
 from app.services.kisan_mitra_service import get_kisan_mitra_service
+from app.services.market_service import get_market_service
+from app.services.asha_service import get_asha_service
 
 logger = logging.getLogger(__name__)
 
@@ -128,14 +130,14 @@ async def incoming_call_india(
             "Namaste. I am your health companion. "
             "नमस्ते. मैं आपकी स्वास्थ्य सहेली हूँ. "
         )
-        response.say(greeting_text, voice="Polly.Aditi", language="en-IN")
+        response.say(greeting_text, voice="Google.en-IN-Neural", language="en-IN")
         response.pause(length=1)
 
     # Timeout once: Give more language options
     elif attempt == 1:
         response.say(
             "Please select your language. कृपया अपनी भाषा चुनें.",
-            voice="Polly.Aditi",
+            voice="Google.en-IN-Neural",
             language="en-IN"
         )
 
@@ -144,7 +146,7 @@ async def incoming_call_india(
         response.say(
             "No selection received. Continuing in Hindi. "
             "कोई चयन नहीं मिला। हिंदी में जारी रखते हैं।",
-            voice="Polly.Aditi",
+            voice="Google.en-IN-Neural",
             language="en-IN"
         )
         response.redirect(f"{settings.base_url}/india/voice/start-recording?lang=hi")
@@ -230,11 +232,11 @@ async def market_menu(request: Request):
             "Namaste. Welcome to Mandi Bol, your market price service. "
             "This service is free and can also offer wellness support for farmers. "
             "Press 1 to continue and get today's prices.",
-            voice="Polly.Aditi",
+            voice="Google.en-IN-Neural",
             language="en-IN"
         )
         response.append(consent_gather)
-        response.say("I did not receive an input. Goodbye.", voice="Polly.Aditi")
+        response.say("I did not receive an input. Goodbye.", voice="Google.en-IN-Neural")
         response.hangup()
         return twiml_response(response)
 
@@ -251,12 +253,12 @@ async def market_menu(request: Request):
         "For Potato prices, press 3. "
         "For Wheat prices, press 4. "
         "For Rice prices, press 5. ",
-        voice="Polly.Aditi",
+        voice="Google.en-IN-Neural",
         language="en-IN"
     )
 
     response.append(gather)
-    response.say("I did not receive an input. Goodbye.", voice="Polly.Aditi")
+    response.say("I did not receive an input. Goodbye.", voice="Google.en-IN-Neural")
     response.hangup()
 
     return twiml_response(response)
@@ -271,7 +273,7 @@ async def market_consent(Digits: str = Form(None)):
         # User consented, redirect to commodity menu
         response.redirect(f"{settings.base_url}/india/voice/market/menu?consent=yes")
     else:
-        response.say("Thank you. Goodbye.", voice="Polly.Aditi", language="en-IN")
+        response.say("Thank you. Goodbye.", voice="Google.en-IN-Neural", language="en-IN")
         response.hangup()
 
     return twiml_response(response)
@@ -293,8 +295,8 @@ async def market_price_immediate(
     response = VoiceResponse()
 
     # Get market price from service
-    kisan_service = get_kisan_mitra_service()
-    price_info = kisan_service.get_market_price(commodity)
+    market_service = get_market_service()
+    price_info = market_service.get_price(commodity)
 
     # Provide price immediately
     response.say(price_info, voice="Polly.Aditi", language="en-IN")
@@ -336,8 +338,9 @@ async def market_wellness_complete(
 
     # Run depression screening in background if recording provided
     if RecordingUrl:
+        market_service = get_market_service()
         background_tasks.add_task(
-            process_wellness_check,
+            market_service.process_wellness_check,
             call_sid=CallSid,
             caller_number=From,
             recording_url=RecordingUrl
@@ -346,40 +349,7 @@ async def market_wellness_complete(
     return twiml_response(response)
 
 
-async def process_wellness_check(call_sid: str, caller_number: str, recording_url: str):
-    """Background task: Analyze wellness check and send intervention if needed"""
-    try:
-        # Download recording
-        twilio_service = get_twilio_service()
-        local_path = settings.recordings_dir / f"{call_sid}_wellness.wav"
-        await twilio_service.download_recording(recording_url, str(local_path))
 
-        # Run depression screening
-        hub = get_model_hub()
-        result = await hub.run_full_analysis_async(
-            str(local_path),
-            enable_respiratory=False,
-            enable_parkinsons=False,
-            enable_depression=True
-        )
-
-        # Check if intervention needed
-        kisan_service = get_kisan_mitra_service()
-        depression_screening = result.screenings.get("depression")
-        should_intervene, reason = kisan_service.check_intervention_needed(depression_screening)
-
-        if should_intervene:
-            # Send SMS with counselor helpline
-            intervention_msg = (
-                f"Namaste. We noticed you may be going through a difficult time. "
-                f"You are not alone. Please call Kisan Call Center at 1800-180-1551 for free support. "
-                f"Your well-being matters. - Mandi Bol Farmer Wellness"
-            )
-            twilio_service.send_sms(caller_number, intervention_msg)
-            logger.info(f"Wellness intervention SMS sent to {caller_number}: {reason}")
-
-    except Exception as e:
-        logger.error(f"Wellness check processing failed for {call_sid}: {e}")
 
 
 @router.post("/voice/market/selection")
@@ -399,7 +369,7 @@ async def market_selection(Digits: str = Form(None)):
         f"You selected {commodity}. "
         "To give you the accurate price, please describe your crop quality in a few sentences after the beep. "
         "Speak for at least 10 seconds.",
-        voice="Polly.Aditi",
+        voice="Google.en-IN-Neural",
         language="en-IN"
     )
     
@@ -420,6 +390,7 @@ async def market_analyze(
     request: Request,
     background_tasks: BackgroundTasks,
     CallSid: str = Form(...),
+    From: str = Form(""),
     RecordingUrl: str = Form(None)
 ):
     """
@@ -432,33 +403,21 @@ async def market_analyze(
     if RecordingUrl:
         response.say("Please wait while we check the market data.", voice="Polly.Aditi")
         
-        # 1. Download & Analyze (Synchronous for MVP flow decision, though usually async is better)
-        # We need the result NOW to decide on intervention.
         try:
-            twilio_service = get_twilio_service()
-            local_path = settings.recordings_dir / f"{CallSid}_market.wav"
-            await twilio_service.download_recording(RecordingUrl, str(local_path))
-            
-            hub = get_model_hub()
-            # Enable Depression Screening!
-            result = await hub.run_full_analysis_async(
-                str(local_path),
-                enable_respiratory=False,
-                enable_parkinsons=False,
-                enable_depression=True 
+            market_service = get_market_service()
+            price_info, should_intervene, reason = await market_service.analyze_and_get_price(
+                call_sid=CallSid,
+                caller_number=From,
+                recording_url=RecordingUrl,
+                commodity=commodity
             )
-            
-            # 2. Check Intervention
-            kisan_service = get_kisan_mitra_service()
-            should_intervene, reason = kisan_service.check_intervention_needed(result.screenings.get("depression"))
             
             if should_intervene:
                 # Redirect to Intervention Flow
                 response.redirect(f"{settings.base_url}/india/voice/kisan-mitra/handover?reason={reason}")
                 return twiml_response(response)
             
-            # 3. Normal Market Flow
-            price_info = kisan_service.get_market_price(commodity)
+            # Normal Market Flow
             response.say(price_info, voice="Polly.Aditi", language="en-IN")
             
             response.say("Thank you for using Mandi Bol. Jai Hind.", voice="Polly.Aditi")
@@ -493,13 +452,13 @@ async def kisan_mitra_handover(request: Request):
         action=f"{settings.base_url}/india/voice/kisan-mitra/connect",
         timeout=10
     )
-    gather.say(script, voice="Polly.Aditi", language="en-IN")
+    gather.say(script, voice="Google.en-IN-Neural", language="en-IN")
     
     response.append(gather)
     
     # If no input, just hangup softly or go back to market? 
     # Let's say goodbye softly.
-    response.say("Take care of yourself. Goodbye.", voice="Polly.Aditi")
+    response.say("Take care of yourself. Goodbye.", voice="Google.en-IN-Neural")
     response.hangup()
     
     return twiml_response(response)
@@ -511,11 +470,11 @@ async def kisan_mitra_connect(Digits: str = Form(None)):
     response = VoiceResponse()
     
     if Digits == '1':
-        response.say("Connecting you to a Kisan Mitra counselor now...", voice="Polly.Aditi")
+        response.say("Connecting you to a Kisan Mitra counselor now...", voice="Google.en-IN-Neural")
         # Mock number for counselor
         response.dial("1800-180-1551") # Kisan Call Center
     else:
-        response.say("No problem. Stay strong. Goodbye.", voice="Polly.Aditi")
+        response.say("No problem. Stay strong. Goodbye.", voice="Google.en-IN-Neural")
     
     return twiml_response(response)
 
@@ -547,7 +506,7 @@ async def language_selected(
     greeting = get_text("greeting", language)
     response.say(
         greeting,
-        voice=lang_config.twilio_voice if lang_config else "Polly.Aditi",
+        voice=lang_config.twilio_voice if lang_config else "Google.en-IN-Neural",
         language=lang_config.twilio_lang if lang_config else "en-IN"
     )
     
@@ -574,7 +533,7 @@ async def start_recording(
     logger.info(f"Start recording: SID={CallSid}, Lang={language}, ASHA={is_asha}, FamilyLoop={family_loop}")
 
     lang_config = get_language_config(language)
-    voice = lang_config.twilio_voice if lang_config else "Polly.Aditi"
+    voice = lang_config.twilio_voice if lang_config else "Google.en-IN-Neural"
     lang_code = lang_config.twilio_lang if lang_config else "en-IN"
 
     response = VoiceResponse()
@@ -627,7 +586,7 @@ async def recording_complete_india(
     logger.info(f"Recording complete (India): SID={CallSid}, Lang={language}, ASHA={is_asha}")
     
     lang_config = get_language_config(language)
-    voice = lang_config.twilio_voice if lang_config else "Polly.Aditi"
+    voice = lang_config.twilio_voice if lang_config else "Google.en-IN-Neural"
     lang_code = lang_config.twilio_lang if lang_config else "en-IN"
     
     response = VoiceResponse()
@@ -741,23 +700,10 @@ async def recording_complete_india(
             # 6. Audio Feedback
             if is_asha:
                 # ASHA mode: Give specific guidance based on risk level
-                if risk_high:
-                    if referral_code:
-                        response.say(
-                            f"URGENT: High risk detected. Priority ticket {referral_code} sent to patient. "
-                            "Please ensure patient visits the clinic today.",
-                            voice="Polly.Aditi", language="en-IN"
-                        )
-                    else:
-                        response.say(
-                            f"High risk detected. Report sent to patient. Please follow up to ensure doctor visit.",
-                            voice="Polly.Aditi", language="en-IN"
-                        )
-                else:
-                    response.say(
-                        f"Screening complete. Risk level is {result.overall_risk_level}. Report sent to patient.",
-                        voice="Polly.Aditi", language="en-IN"
-                    )
+                asha_service = get_asha_service()
+                feedback = asha_service.get_screening_feedback(result.overall_risk_level, referral_code)
+                response.say(feedback, voice="Polly.Aditi", language="en-IN")
+                
                 # Loop back for next patient
                 response.redirect(f"{settings.base_url}/india/voice/asha/menu")
                 return twiml_response(response)
@@ -869,7 +815,7 @@ async def family_decision(
         next_loop = loop_count + 1
         response.redirect(f"{settings.base_url}/india/voice/start-recording?lang={language}&family_loop={next_loop}")
     else:
-        response.say("Namaste. Goodbye.", voice="Polly.Aditi", language="en-IN")
+        response.say("Namaste. Goodbye.", voice="Google.en-IN-Neural", language="en-IN")
         response.hangup()
 
     return twiml_response(response)
@@ -888,7 +834,7 @@ async def asha_menu(request: Request):
     if attempt >= 5:
         response.say(
             "Maximum attempts reached. Exiting ASHA mode. Thank you for your service.",
-            voice="Polly.Aditi",
+            voice="Google.en-IN-Neural",
             language="en-IN"
         )
         response.hangup()
@@ -903,7 +849,7 @@ async def asha_menu(request: Request):
     gather.say(
         "ASHA Mode. Please enter the 10 digit mobile number of the patient, followed by the hash key. "
         "Or press star star to exit ASHA mode.",
-        voice="Polly.Aditi",
+        voice="Google.en-IN-Neural",
         language="en-IN"
     )
     response.append(gather)
@@ -925,7 +871,7 @@ async def asha_patient_entry(
     if Digits and (Digits.startswith('*') or Digits == '*'):
         response.say(
             "Exiting ASHA mode. Thank you for your service. Namaste.",
-            voice="Polly.Aditi",
+            voice="Google.en-IN-Neural",
             language="en-IN"
         )
         response.hangup()
@@ -935,7 +881,7 @@ async def asha_patient_entry(
     if not Digits or len(Digits) < 10:
         response.say(
             "Invalid number. Please try again.",
-            voice="Polly.Aditi",
+            voice="Google.en-IN-Neural",
             language="en-IN"
         )
         response.redirect(f"{settings.base_url}/india/voice/asha/menu")
@@ -945,7 +891,7 @@ async def asha_patient_entry(
     query_params = dict(request.query_params)
     patient_lang = query_params.get("lang", "hi")
 
-    response.say(f"Patient number {Digits}. Starting screening.", voice="Polly.Aditi")
+    response.say(f"Patient number {Digits}. Starting screening.", voice="Google.en-IN-Neural")
 
     response.redirect(f"{settings.base_url}/india/voice/start-recording?lang={patient_lang}&patient_id={Digits}&is_asha=true")
 
