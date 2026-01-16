@@ -39,6 +39,7 @@ This platform transforms a simple phone call into a comprehensive health screeni
 
 | Feature | Description |
 |---------|-------------|
+| **Conversational AI Agent** | Natural language voice interaction with RAG-powered responses (NEW) |
 | **Multi-Disease Screening** | Single call screens for 3 conditions simultaneously |
 | **Zero-Cost Access** | Missed call callback eliminates cost barriers |
 | **Multi-Language Support** | English, Hindi, and dialectal prompts |
@@ -99,6 +100,16 @@ We have implemented specific features to bridge the digital divide in rural Indi
 | **Solution** | **Passive Screening** hidden inside market price service |
 | **Flow** | Farmer calls for onion prices → Asked to describe crop quality → Depression classifier analyzes voice |
 | **Intervention** | If distress detected: *"I noticed you sound tired... Our Kisan Mitra counselor is here."* |
+
+### 7. Conversational AI Voice Agent (NEW)
+| Aspect | Details |
+|--------|---------|
+| **Problem** | Predefined DTMF menus feel robotic and impersonal |
+| **Solution** | Natural language conversational agent with speech input |
+| **Tech** | GPT-4o-mini + RAG (Retrieval-Augmented Generation) from health knowledge base |
+| **Flow** | User speaks naturally → Speech-to-text → RAG lookup → Personalized LLM response |
+| **Endpoint** | `POST /voice-agent/start` |
+| **Config** | `ENABLE_VOICE_AGENT=true` in `.env` |
 
 ---
 
@@ -632,6 +643,17 @@ Configure these webhooks in your [Twilio Console](https://console.twilio.com/):
 | `GET` | `/family/{phone}/dashboard` | Family health dashboard |
 | `GET` | `/family/{phone}/screenings` | List all family screenings |
 | `POST` | `/family/add-member` | Add family member to screening group |
+
+### Voice Agent (`/voice-agent/*`) - NEW
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/voice-agent/start` | Start conversational voice agent call |
+| `POST` | `/voice-agent/process-speech` | Process user speech input with LLM |
+| `POST` | `/voice-agent/recording-complete` | Handle cough recording and analysis |
+| `POST` | `/voice-agent/family-decision` | Handle family screening decision |
+| `POST` | `/voice-agent/continue` | Continue conversation from a step |
+| `POST` | `/voice-agent/goodbye` | End call with warm goodbye |
 
 ---
 

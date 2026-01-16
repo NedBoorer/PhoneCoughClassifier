@@ -65,8 +65,12 @@ async def incoming_call_router(
         # Called the market service number → Mandi Bol
         logger.info(f"Routing to Mandi Bol market service")
         response.redirect(f"{settings.base_url}/india/voice/market/menu")
+    elif settings.enable_voice_agent:
+        # Voice agent is enabled → use conversational AI flow
+        logger.info(f"Routing to conversational voice agent")
+        response.redirect(f"{settings.base_url}/voice-agent/start")
     else:
-        # Default to health screening service
+        # Default to DTMF-based health screening service
         logger.info(f"Routing to health screening service")
         response.redirect(f"{settings.base_url}/india/voice/incoming")
 
@@ -533,37 +537,49 @@ async def start_recording(
     lang: str = "en"
 ):
     """Start the cough recording in selected language"""
-    # Get lang from query params
+    # Get all query params to preserve state
     query_params = dict(request.query_params)
     language = query_params.get("lang", "en")
-    
-    logger.info(f"Start recording: SID={CallSid}, Lang={language}")
-    
+    patient_id = query_params.get("patient_id")
+    is_asha = query_params.get("is_asha")
+    family_loop = query_params.get("family_loop", "0")
+
+    logger.info(f"Start recording: SID={CallSid}, Lang={language}, ASHA={is_asha}, FamilyLoop={family_loop}")
+
     lang_config = get_language_config(language)
     voice = lang_config.twilio_voice if lang_config else "Polly.Aditi"
     lang_code = lang_config.twilio_lang if lang_config else "en-IN"
-    
+
     response = VoiceResponse()
-    
+
     # Instruction in selected language
     instruction = get_text("record_instruction", language)
     response.say(instruction, voice=voice, language=lang_code)
-    
+
     response.pause(length=1)
-    
+
     cough_now = get_text("please_cough", language)
     response.say(cough_now, voice=voice, language=lang_code)
-    
+
+    # Build action URL with all params preserved
+    action_params = [f"lang={language}", f"family_loop={family_loop}"]
+    if is_asha:
+        action_params.append(f"is_asha={is_asha}")
+    if patient_id:
+        action_params.append(f"patient_id={patient_id}")
+
+    action_url = f"{settings.base_url}/india/voice/recording-complete?{'&'.join(action_params)}"
+
     # Record
     response.record(
         max_length=settings.max_recording_duration,
         timeout=3,
         play_beep=True,
         trim="trim-silence",
-        action=f"{settings.base_url}/india/voice/recording-complete?lang={language}",
+        action=action_url,
         recording_status_callback=f"{settings.base_url}/twilio/voice/recording-status"
     )
-    
+
     return twiml_response(response)
 
 
@@ -642,7 +658,8 @@ async def recording_complete_india(
                     probabilities=respiratory_screening.details.get("probabilities", {}) if respiratory_screening else {},
                     severity=result.overall_risk_level,
                     recommendation=result.recommendation,
-                    referral_code=referral_code
+                    referral_code=referral_code,
+                    processing_time_ms=result.processing_time_ms
                 )
                 db.add(class_result)
                 await db.commit()
@@ -877,8 +894,8 @@ async def asha_patient_entry(
     """Confirm patient and start screening"""
     response = VoiceResponse()
 
-    # Check for exit signal (* or **)
-    if Digits and ('*' in Digits):
+    # Check for exit signal (** or just *)
+    if Digits and (Digits.startswith('*') or Digits == '*'):
         response.say(
             "Exiting ASHA mode. Thank you for your service. Namaste.",
             voice="Polly.Aditi",

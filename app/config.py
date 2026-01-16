@@ -72,6 +72,12 @@ class Settings(BaseSettings):
     enable_asha_mode: bool = True
     enable_kisan_manas: bool = True
     
+    # Voice Agent Configuration
+    enable_voice_agent: bool = True
+    voice_agent_model: str = "gpt-4o-mini"
+    voice_agent_max_turns: int = 10
+    voice_agent_timeout: int = 10  # seconds to wait for speech input
+    
     # Logging
     log_level: str = "INFO"
     log_file: str = "./data/app.log"

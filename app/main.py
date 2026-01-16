@@ -63,6 +63,15 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Depression classifier not loaded: {e}")
     
+    # Initialize RAG knowledge base for voice agent
+    if settings.enable_voice_agent:
+        try:
+            from app.services.rag_service import initialize_rag_service
+            await initialize_rag_service()
+            logger.info("✓ RAG knowledge base initialized")
+        except Exception as e:
+            logger.warning(f"RAG knowledge base not initialized: {e}")
+    
     yield
     
     # Shutdown
@@ -212,6 +221,15 @@ try:
     logger.info("✓ Family endpoints loaded")
 except ImportError as e:
     logger.warning(f"Family endpoints not loaded: {e}")
+
+# Voice Agent (Conversational AI)
+if settings.enable_voice_agent:
+    try:
+        from app.api.voice_agent_webhooks import router as voice_agent_router
+        app.include_router(voice_agent_router, prefix="/voice-agent", tags=["Voice Agent"])
+        logger.info("✓ Voice agent webhooks loaded")
+    except ImportError as e:
+        logger.warning(f"Voice agent webhooks not loaded: {e}")
 
 
 # ==================
