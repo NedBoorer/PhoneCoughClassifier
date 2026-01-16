@@ -393,6 +393,39 @@ sequenceDiagram
 
 ---
 
+## 🚀 Deployment Checklist & To-Dos
+
+Before deploying this project to production, ensure the following tasks are completed:
+
+- [ ] **Model Training**: Ensure all ML models are trained and present in the `models/` directory:
+  - `models/cough_classifier.joblib`
+  - `models/parkinsons_classifier.joblib`
+  - `models/depression_classifier.joblib`
+- [ ] **Environment Variables**:
+  - Set `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and `TWILIO_PHONE_NUMBER`.
+  - Set `OPENAI_API_KEY` for the conversational voice agent.
+  - Set `DOCTOR_HELPLINE_NUMBER` for high-risk triage.
+- [ ] **Infrastructure**:
+  - [ ] Set up a production server (VPS/Cloud) with Docker & Docker Compose.
+  - [ ] Configure `nginx` with SSL certificates (Let's Encrypt recommended).
+  - [ ] Set up a persistent database volume.
+- [ ] **Twilio Configuration**:
+  - Point Twilio Webhooks to your production URL (e.g., `https://your-api.com/india/voice/router`).
+  - Enable "Enhanced Programmable SIP Trunking" if using SIP.
+- [ ] **Testing**:
+  - [ ] Run full test suite: `pytest`
+  - [ ] Verify "Missed Call" functionality with a real device.
+  - [ ] Verify WhatsApp message delivery.
+
+### 🔮 Future Work / Roadmap
+
+- [ ] **App Integration**: Build a Flutter/React Native app for ASHA workers.
+- [ ] **More Languages**: Add support for Tamil, Telugu, and Bengali.
+- [ ] **EHR Integration**: Connect with FHIR-compliant Electronic Health Records.
+- [ ] **Offline Mode**: Enable offline caching for ASHA worker app.
+
+---
+
 ## 🛠️ Installation & Setup
 
 ### Prerequisites
