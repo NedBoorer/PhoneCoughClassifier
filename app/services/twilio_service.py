@@ -227,51 +227,28 @@ def format_sms_result(
         
         return message
 
-    # Fallback to simple single-classifier format (existing logic)
-    class_names = {
-        "en": {
-            "dry": "Dry (Non-productive)",
-            "wet": "Wet (Productive)",
-            "whooping": "Whooping/Barking",
-            "chronic": "Chronic",
-            "normal": "Normal (Acute)"
-        },
-        "hi": {
-            "dry": "सूखी खांसी",
-            "wet": "बलगम वाली खांसी",
-            "whooping": "काली खांसी",
-            "chronic": "पुरानी खांसी",
-            "normal": "सामान्य खांसी"
-        }
-    }
+    # Dynamic Multi-language SMS
+    from app.utils.i18n import get_text, get_class_name
     
-    # Get display name
-    names = class_names.get(language, class_names["en"])
-    class_display = names.get(classification, classification.title())
+    # Get translated components
+    title = get_text("result_title", language)
+    lbl_class = get_text("label_classification", language)
+    lbl_conf = get_text("label_confidence", language)
+    class_name = get_class_name(classification, language)
+    disclaimer = get_text("disclaimer", language)
+    helpline = get_text("helpline", language)
     
-    # Format message
     confidence_pct = int(confidence * 100)
     
-    if language == "hi":
-        message = f"""🩺 खांसी विश्लेषण परिणाम
+    message = f"""{title}
 
-वर्गीकरण: {class_display}
-विश्वास स्तर: {confidence_pct}%
-
-{recommendation}
-
-यह AI विश्लेषण है। गंभीर लक्षणों के लिए डॉक्टर से मिलें।
-हेल्पलाइन: 108"""
-    else:
-        message = f"""🩺 Cough Analysis Result
-
-Classification: {class_display}
-Confidence: {confidence_pct}%
+{lbl_class}: {class_name}
+{lbl_conf}: {confidence_pct}%
 
 {recommendation}
 
-This is an AI analysis. For serious symptoms, please consult a doctor.
-Health Helpline (India): 108"""
+{disclaimer}
+{helpline}"""
     
     return message
 

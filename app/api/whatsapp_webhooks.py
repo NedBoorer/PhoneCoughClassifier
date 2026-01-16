@@ -103,8 +103,8 @@ async def handle_incoming_whatsapp(
         whatsapp_service.send_text(From, msg)
         return Response(status_code=200)
 
-    # 2b. Global Commands (Restart/Help)
-    if body_text in ["hi", "hello", "help", "start", "restart", "menu", "नमस्ते"]:
+    # 2b. Global Commands (Restart/Help/Menu)
+    if body_text in ["hi", "hello", "help", "start", "restart", "menu", "नमस्ते", "main menu"]:
         session.update_state(ConversationState.LANGUAGE_SELECT)
         
         welcome_msg = settings.whatsapp_welcome_message
@@ -126,16 +126,16 @@ async def handle_incoming_whatsapp(
     if session.state == ConversationState.AWAITING_AUDIO:
         # User sent text instead of audio
         if session.language == "hi":
-            msg = "कृपया एक वॉयस नोट (voice note) भेजें जिसमें आप खांस रहे हों। 🎙️"
+            msg = "⚠️ कृपया टेक्स्ट न भेजें।\nजांच करने के लिए, **माइक्रोफोन बटन** दबाएं और अपनी खांसी रिकॉर्ड करें। 🎙️"
         else:
-            msg = "Please send a **voice note** of your cough to start the screening. 🎙️"
+            msg = "⚠️ Please do not send text.\nTo screen your health, press the **microphone button** and record your cough. 🎙️"
             
         whatsapp_service.send_text(From, msg)
     else:
-        # Send menu again
+        # Send menu help for other states
         whatsapp_service.send_text(
             From, 
-            "I didn't understand that command. Type 'Hi' to start over."
+            "I didn't understand that command. \n\nReply:\n• **'Menu'** to restart\n• **'Help'** for instructions"
         )
             
     return Response(status_code=200)

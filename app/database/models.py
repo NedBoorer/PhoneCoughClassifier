@@ -129,6 +129,12 @@ class ClassificationResult(Base):
     # Action
     referral_code = Column(String(20), nullable=True)  # The "Golden Ticket"
 
+    # Digital Handshake (Referral Verification)
+    visit_verified = Column(Boolean, default=False)
+    visit_verified_at = Column(DateTime, nullable=True)
+    visit_verified_by = Column(String(20), nullable=True)  # CallerID of doctor
+    verifier_notes = Column(Text, nullable=True)
+
     # Relationship
     call = relationship("CallRecord", back_populates="classification")
     

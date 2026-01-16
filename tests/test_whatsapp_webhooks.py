@@ -4,6 +4,38 @@ Tests for WhatsApp Webhooks
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 
+class TestHealthCardGeneration:
+    """Test health card generation logic"""
+    
+    @patch("app.utils.health_card_generator.create_image")
+    def test_generate_card_calls_image_generator(self, mock_create_image):
+        from app.utils.health_card_generator import generate_health_card
+        from app.ml.model_hub import ComprehensiveHealthResult, ScreeningResult
+
+        # Mock result
+        result = ComprehensiveHealthResult(
+            primary_concern="none",
+            overall_risk_level="normal",
+            screenings={
+                "respiratory": ScreeningResult(
+                    disease="respiratory",
+                    detected=False,
+                    confidence=0.9,
+                    severity="normal",
+                    details={}
+                )
+            },
+            recommendation="Stay healthy"
+        )
+        
+        path = generate_health_card(result, language="en")
+        
+        assert path is not None
+        mock_create_image.assert_called_once()
+        args = mock_create_image.call_args[1]
+        assert args["risk_level"] == "normal"
+        assert "Stay healthy" in args["details"]
+
 @pytest.fixture
 def mock_whatsapp_service():
     with patch("app.api.whatsapp_webhooks.get_whatsapp_service") as mock:

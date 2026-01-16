@@ -32,6 +32,7 @@ LANGUAGE_MAP = {
     "7": "gu",
     "8": "kn",
     "9": "ml",
+    "0": "pa",
 }
 
 @router.post("/voice/router")
@@ -158,21 +159,44 @@ async def incoming_call_india(
     )
 
     # Bilingual language options
+    # Bilingual language options
     if attempt == 0:
+        # Play all language prompts
+        # 1. English
+        gather.say("For English, press 1.", voice="Google.en-IN-Neural", language="en-IN")
+        # 2. Hindi
+        gather.say("हिंदी के लिए 2 दबाएं।", voice="Google.hi-IN-Neural", language="hi-IN")
+        # 3. Tamil
+        gather.say("தமிழுக்கு 3 அழுத்தவும்.", voice="Google.ta-IN-Neural", language="ta-IN")
+        # 4. Telugu
+        gather.say("తెలుగు కోసం 4 నొక్కండి.", voice="Google.te-IN-Neural", language="te-IN")
+        # 5. Bengali
+        gather.say("বাংলার জন্য 5 টিপুন।", voice="Google.bn-IN-Neural", language="bn-IN")
+        # 6. Marathi
+        gather.say("मराठीसाठी 6 दाबा.", voice="Google.mr-IN-Neural", language="mr-IN")
+        # 7. Gujarati
+        gather.say("ગુજરાતી માટે 7 દબાવો.", voice="Google.gu-IN-Neural", language="gu-IN")
+        # 8. Kannada
+        gather.say("ಕನ್ನಡಕ್ಕಾಗಿ 8 ಒತ್ತಿರಿ.", voice="Google.kn-IN-Neural", language="kn-IN")
+        # 9. Malayalam
+        gather.say("മലയാളത്തിന് 9 അമർത്തുക.", voice="Google.ml-IN-Neural", language="ml-IN")
+        # 0. Punjabi
+        gather.say("ਪੰਜਾਬੀ ਲਈ 0 ਦਬਾਓ।", voice="Google.pa-IN-Neural", language="pa-IN")
+        
+        # ASHA Mode (Star)
+        gather.say("Health Workers, press star.", voice="Google.en-IN-Neural", language="en-IN")
+        
+    else:
+        # Second attempt: Grouped/Concise
         gather.say(
-            "For English, press 1. "
-            "हिंदी के लिए 2 दबाएं. "
-            "Health Workers, press 9.",
-            voice="Polly.Aditi",
+            "Press 1 for English. 2 for Hindi. Star for ASHA mode.",
+            voice="Google.en-IN-Neural",
             language="en-IN"
         )
-    else:
-        # Second attempt: More concise
         gather.say(
-            "Press 1 for English. 2 for Hindi. 9 for ASHA mode. "
-            "1 अंग्रेजी के लिए। 2 हिंदी के लिए। 9 आशा मोड के लिए।",
-            voice="Polly.Aditi",
-            language="en-IN"
+            "हिंदी के लिए 2 दबाएं।",
+            voice="Google.hi-IN-Neural",
+            language="hi-IN"
         )
 
     response.append(gather)
@@ -507,9 +531,12 @@ async def language_selected(
     logger.info(f"Language selected: SID={CallSid}, Digits={Digits}")
     
     # Get language from digit
-    if Digits == '9':
+    # Get language from digit
+    if Digits == '*':
         # ASHA Mode
-        return twiml_response(VoiceResponse().redirect(f"{settings.base_url}/india/voice/asha/menu"))
+        response = VoiceResponse()
+        response.redirect(f"{settings.base_url}/india/voice/asha/menu")
+        return twiml_response(response)
 
     language = LANGUAGE_MAP.get(Digits, "en")
     lang_config = get_language_config(language)

@@ -395,34 +395,40 @@ sequenceDiagram
 
 ## 🚀 Deployment Checklist & To-Dos
 
-Before deploying this project to production, ensure the following tasks are completed:
+Before deploying this project to production, ensure the following tasks are completed.
 
-- [ ] **Model Training**: Ensure all ML models are trained and present in the `models/` directory:
-  - `models/cough_classifier.joblib`
-  - `models/parkinsons_classifier.joblib`
-  - `models/depression_classifier.joblib`
+### ✅ Immediate Priorities (Code Cleanup & Validation)
+- [ ] **Data Validation**: 
+  - Ensure `app/utils/health_card_generator.py` handles missing fonts gracefully.
+  - Verify translations are available for all 10 supported languages in `app/languages.py` (or equivalent config).
+- [ ] **Model Validation**: 
+  - Verify `models/cough_classifier.joblib`, `models/parkinsons_classifier.joblib`, and `models/depression_classifier.joblib` are loaded correctly at startup.
+  - Run `tests/test_screening_models.py` (if available) to confirm model inference works.
+
+### 🏗️ Infrastructure & Deployment
 - [ ] **Environment Variables**:
   - Set `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and `TWILIO_PHONE_NUMBER`.
   - Set `OPENAI_API_KEY` for the conversational voice agent.
-  - Set `DOCTOR_HELPLINE_NUMBER` for high-risk triage.
-- [ ] **Infrastructure**:
+  - Set `DOCTOR_HELPLINE_NUMBER` (eSanjeevani bridge).
+  - Set `POSTGRES_DB` connection string (move away from SQLite).
+- [ ] **Triage & Safety**:
+  - **Bridge to Doctor**: Verify the `DOCTOR_HELPLINE_NUMBER` successfully connects users to a real doctor/helpline when risk is HIGH.
+  - **Rate Limiting**: Implement Redis-based rate limiting for the "Missed Call" endpoint to prevent abuse.
+- [ ] **Production Configuration**:
   - [ ] Set up a production server (VPS/Cloud) with Docker & Docker Compose.
-  - [ ] Configure `nginx` with SSL certificates (Let's Encrypt recommended).
-  - [ ] Set up a persistent database volume.
-- [ ] **Twilio Configuration**:
-  - Point Twilio Webhooks to your production URL (e.g., `https://your-api.com/india/voice/router`).
-  - Enable "Enhanced Programmable SIP Trunking" if using SIP.
-- [ ] **Testing**:
-  - [ ] Run full test suite: `pytest`
-  - [ ] Verify "Missed Call" functionality with a real device.
-  - [ ] Verify WhatsApp message delivery.
+  - [ ] Configure `nginx` with SSL certificates (Let's Encrypt).
+  - [ ] Set up **Sentry** or similar for error tracking in production.
+  - [ ] Configure persistent volumes for database and user recordings.
 
-### 🔮 Future Work / Roadmap
-
-- [ ] **App Integration**: Build a Flutter/React Native app for ASHA workers.
-- [ ] **More Languages**: Add support for Tamil, Telugu, and Bengali.
-- [ ] **EHR Integration**: Connect with FHIR-compliant Electronic Health Records.
-- [ ] **Offline Mode**: Enable offline caching for ASHA worker app.
+### 🔮 Roadmap & Future Features
+- [ ] **App Integration**: Build a Flutter/React Native app for ASHA workers for offline syncing.
+- [ ] **More Languages**: Expand support to Tamil, Telugu, and Bengali (ensure 100% TTS coverage).
+- [ ] **Clinical Integration**:
+  - [ ] Integrating with **Ayushman Bharat Digital Mission (ABDM)** IDs.
+  - [ ] Direct API integration with **eSanjeevani** for appointment booking.
+- [ ] **Kisan Manas Expansion**:
+  - [ ] Add active intervention scripts for counselors.
+  - [ ] Partner with local NGOs for on-ground support.
 
 ---
 

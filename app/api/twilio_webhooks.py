@@ -12,6 +12,7 @@ import asyncio
 from fastapi import APIRouter, Form, Request, BackgroundTasks, Depends
 from fastapi.responses import Response
 from twilio.twiml.voice_response import VoiceResponse, Gather
+from twilio.twiml.messaging_response import MessagingResponse
 
 from app.config import settings
 from app.utils.twiml_helpers import twiml_response
@@ -317,3 +318,48 @@ async def recording_status():
 @router.post("/voice/status")
 async def call_status():
     return Response(status_code=200)
+
+
+@router.post("/sms/incoming")
+async def incoming_sms(
+    From: str = Form(...),
+    Body: str = Form(...)
+):
+    """
+    Handle incoming SMS to this Twilio number.
+    Supports:
+    - Referral Verification: "SEEN REF-1234"
+    """
+    logger.info(f"Incoming SMS from {From}: {Body}")
+    
+    # Simple command parsing
+    clean_body = Body.strip().upper()
+    
+    # Check for Verification Command
+    if "REF-" in clean_body and ("SEEN" in clean_body or "VERIFY" in clean_body):
+        import re
+        from app.services.referral_service import get_referral_service
+        
+        # Extract REF-XXXX
+        match = re.search(r"REF-\d+", clean_body)
+        if match:
+            referral_code = match.group(0)
+            
+            service = get_referral_service()
+            # Verify
+            success = await service.verify_referral(
+                referral_code=referral_code,
+                verifier_phone=From,
+                notes=Body
+            )
+            
+            resp = MessagingResponse()
+            if success:
+                resp.message(f"✅ Verified {referral_code}. Thank you, Doctor.")
+            else:
+                resp.message(f"❌ Error: Code {referral_code} not found.")
+                
+            return Response(content=str(resp), media_type="application/xml")
+
+    # Default: No response or generic acknowledgment
+    return Response(content="<Response></Response>", media_type="application/xml")
