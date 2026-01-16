@@ -1,0 +1,33 @@
+{
+  "model_type": "parkinsons_classifier",
+  "feature_names": [
+    "jitter_absolute",
+    "jitter_relative",
+    "jitter_rap",
+    "jitter_ppq5",
+    "shimmer_absolute",
+    "shimmer_relative",
+    "shimmer_apq3",
+    "shimmer_apq5",
+    "shimmer_dda",
+    "hnr_mean",
+    "hnr_std",
+    "hnr_min",
+    "hnr_max",
+    "f0_mean",
+    "f0_std",
+    "f0_min",
+    "f0_max",
+    "f0_range",
+    "f0_variation_coefficient"
+  ],
+  "class_names": [
+    "normal",
+    "low_risk",
+    "moderate_risk",
+    "elevated_risk"
+  ],
+  "num_samples": 500,
+  "num_features": 19,
+  "synthetic_data": true
+}

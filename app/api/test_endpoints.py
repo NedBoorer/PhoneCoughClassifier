@@ -519,8 +519,8 @@ async def list_screening_models():
         models["respiratory_classifier"]["loaded"] = hub._respiratory is not None and hub._respiratory._loaded
         models["parkinsons_detector"]["loaded"] = hub._parkinsons is not None and hub._parkinsons._loaded
         models["depression_screener"]["loaded"] = hub._depression is not None and hub._depression._loaded
-    except Exception:
-        pass
+    except Exception as e:
+        logger.error(f"Error checking model status: {e}")
     
     return {"models": models}
 

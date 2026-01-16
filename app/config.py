@@ -13,7 +13,8 @@ class Settings(BaseSettings):
     # Twilio
     twilio_account_sid: str = ""
     twilio_auth_token: str = ""
-    twilio_phone_number: str = ""
+    twilio_phone_number: str = ""  # Primary number for general health screening
+    twilio_market_phone_number: str = ""  # Dedicated number for Mandi Bol market service
     
     # OpenAI
     openai_api_key: str = ""
@@ -60,6 +61,20 @@ class Settings(BaseSettings):
     pesticide_risk_threshold: float = 0.7  # Lower threshold for pesticide exposure
     dust_risk_threshold: float = 0.65
 
+    # WhatsApp Configuration
+    twilio_whatsapp_from: str = "whatsapp:+14155238886"  # Twilio sandbox number
+    
+    # ML Thresholds
+    confidence_threshold: float = 0.7
+    
+    # Feature Flags (from .env)
+    enable_missed_call: bool = True
+    enable_asha_mode: bool = True
+    enable_kisan_manas: bool = True
+    
+    # Logging
+    log_level: str = "INFO"
+    log_file: str = "./data/app.log"
 
     # Paths
     @property

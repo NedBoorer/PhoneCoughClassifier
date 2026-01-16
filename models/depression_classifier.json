@@ -1,0 +1,39 @@
+{
+  "model_type": "depression_classifier",
+  "feature_names": [
+    "f0_mean",
+    "f0_std",
+    "f0_min",
+    "f0_max",
+    "f0_range",
+    "f0_variation_coefficient",
+    "speech_rate",
+    "articulation_rate",
+    "num_syllables",
+    "total_duration",
+    "voiced_duration",
+    "num_pauses",
+    "total_pause_duration",
+    "mean_pause_duration",
+    "max_pause_duration",
+    "pause_ratio",
+    "pause_rate",
+    "pitch_range_semitones",
+    "pitch_slope",
+    "pitch_inflection_rate",
+    "energy_mean",
+    "energy_std",
+    "energy_variation_coefficient",
+    "energy_range_db"
+  ],
+  "class_names": [
+    "minimal",
+    "mild",
+    "moderate",
+    "moderately_severe",
+    "severe"
+  ],
+  "num_samples": 500,
+  "num_features": 24,
+  "synthetic_data": true
+}

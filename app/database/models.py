@@ -114,15 +114,18 @@ class ClassificationResult(Base):
     
     # Audio features extracted
     audio_features = Column(JSON, nullable=True)
-    
+
+    # Questionnaire data (from interactive voice questions)
+    questionnaire_data = Column(JSON, nullable=True)
+
     # Timing
     processing_time_ms = Column(Integer)  # milliseconds
     created_at = Column(DateTime, default=datetime.utcnow)
-    
+
     # Recommendation
     severity = Column(String(20))  # mild, moderate, urgent, emergency
     recommendation = Column(Text)
-    
+
     # Action
     referral_code = Column(String(20), nullable=True)  # The "Golden Ticket"
 

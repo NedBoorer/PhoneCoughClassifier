@@ -164,7 +164,7 @@ async def outbound_checkup_flow(
     
     gather = Gather(
         num_digits=1,
-        action=f"{settings.base_url}/india/voice/outbound-checkup/response",
+        action=f"{settings.base_url}/admin/voice/outbound-checkup/response",
         timeout=10
     )
     gather.say(

@@ -12,19 +12,12 @@ from fastapi.responses import Response
 from twilio.twiml.voice_response import VoiceResponse
 
 from app.config import settings
+from app.utils.twiml_helpers import twiml_response
 from app.services.twilio_service import get_twilio_service
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-
-def twiml_response(twiml: VoiceResponse) -> Response:
-    """Return TwiML as XML response"""
-    return Response(
-        content=str(twiml),
-        media_type="application/xml"
-    )
 
 
 def format_parkinsons_sms(result, language: str = "en") -> str:
@@ -466,9 +459,13 @@ async def health_incoming(
     Presents menu to choose screening type.
     """
     logger.info(f"Health screening call: SID={CallSid}, From={From}, Digits={Digits}")
-    
+
+    # Track attempt count to prevent infinite loops
+    query_params = dict(request.query_params)
+    attempt = int(query_params.get("attempt", 0))
+
     response = VoiceResponse()
-    
+
     if Digits == "1":
         # Redirect to Parkinson's screening
         response.redirect(f"{settings.base_url}/health/voice/parkinsons/incoming")
@@ -476,13 +473,24 @@ async def health_incoming(
         # Redirect to Depression screening
         response.redirect(f"{settings.base_url}/health/voice/depression/incoming")
     else:
+        # Max 3 attempts before auto-hangup
+        if attempt >= 3:
+            response.say(
+                "I did not receive a valid selection. Please call back when you are ready. Goodbye.",
+                voice="Polly.Aditi",
+                language="en-IN"
+            )
+            response.hangup()
+            return twiml_response(response)
+
         # Present menu
         gather = response.gather(
             num_digits=1,
             action=f"{settings.base_url}/health/voice/incoming",
-            method="POST"
+            method="POST",
+            timeout=10
         )
-        
+
         gather.say(
             "Welcome to the Voice Health Screening service. "
             "Press 1 for Parkinson's disease voice screening. "
@@ -490,8 +498,8 @@ async def health_incoming(
             voice="Polly.Aditi",
             language="en-IN"
         )
-        
-        # If no input, repeat
-        response.redirect(f"{settings.base_url}/health/voice/incoming")
-    
+
+        # Increment attempt counter on redirect
+        response.redirect(f"{settings.base_url}/health/voice/incoming?attempt={attempt + 1}")
+
     return twiml_response(response)

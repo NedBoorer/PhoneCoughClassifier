@@ -70,8 +70,8 @@ async def lifespan(app: FastAPI):
     try:
         from app.database.database import close_db
         await close_db()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.error(f"Error during database shutdown: {e}")
 
 
 # Create FastAPI app
