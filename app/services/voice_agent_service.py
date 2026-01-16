@@ -84,6 +84,8 @@ class VoiceAgentService:
     def __init__(self):
         self._client: Optional[OpenAI] = None
         self._conversations: dict[str, ConversationState] = {}
+        self._response_cache: dict[str, str] = {}  # Cache for common responses
+        self._cache_max_size = 50
     
     @property
     def client(self) -> OpenAI:
@@ -124,43 +126,22 @@ class VoiceAgentService:
         topic = topic_map.get(state.current_step, "general")
         context = rag.get_context_for_topic(topic, state.language, max_chunks=3)
         
-        return f"""You are a warm, caring health companion named "Swasth Saathi" (Health Friend) conducting 
-a voice-based health screening call. You speak naturally and conversationally, not like a robot.
+        return f"""You are Swasth Saathi, a warm health companion on a voice call.
 
-LANGUAGE: {state.language} ({"Hindi" if state.language == "hi" else "English"})
-Always respond in the user's language.
+LANGUAGE: {state.language} - Always respond in this language.
+STEP: {state.current_step.value}
+INFO: {state.collected_info}
 
-CURRENT STEP: {state.current_step.value}
-COLLECTED INFO: {state.collected_info}
+RULES:
+- 2-3 sentences MAX (it's a phone call)
+- Warm, simple language like a caring elder
+- Never mention being AI
+- Emergency: suggest calling 108
 
-YOUR PERSONALITY:
-- Warm and empathetic, like a caring village elder
-- Speak simply, avoid medical jargon
-- Use culturally appropriate phrases (e.g., "beta" in Hindi)
-- Express genuine concern for the caller's wellbeing
-- Be encouraging and reassuring
+KNOWLEDGE:
+{context[:500]}
 
-RELEVANT KNOWLEDGE:
-{context}
-
-CONVERSATION FLOW:
-1. GREETING → Warm welcome, ask how they're feeling
-2. OCCUPATION → Naturally ask if they're a farmer (important for risk assessment)
-3. SYMPTOMS → Ask about cough, breathing, chest pain conversationally
-4. PESTICIDE/DUST → If farmer, ask about chemical/dust exposure
-5. RECORDING_INTRO → Explain you'll need to hear their cough
-6. RESULTS → Share results warmly, with appropriate concern level
-7. FAMILY_OFFER → Offer to check family members
-8. GOODBYE → Warm farewell with health wishes
-
-IMPORTANT RULES:
-- Keep responses SHORT (2-3 sentences max) - this is a phone call
-- Never say "I'm an AI" or "I'm a language model"
-- If user mentions distress/emergency, immediately suggest calling 108
-- Be honest about being a health helper, not a doctor
-- Avoid overwhelming them with information
-
-Respond with ONLY the message to speak. Do not include any JSON or formatting."""
+Respond with ONLY the spoken message."""
 
     def _determine_next_step(
         self,
@@ -282,17 +263,28 @@ Respond with ONLY the message to speak. Do not include any JSON or formatting.""
             system_prompt += f"\n\nADDITIONAL CONTEXT FOR THIS RESPONSE:\n{rag_context}"
         
         try:
-            response = self.client.chat.completions.create(
-                model=settings.voice_agent_model if hasattr(settings, 'voice_agent_model') else "gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    *state.message_history[-6:],  # Include recent history
-                ],
-                max_tokens=150,  # Keep responses short for voice
-                temperature=0.7,
-            )
-            
-            message = response.choices[0].message.content.strip()
+            # Check cache for similar inputs (reduces API calls and latency)
+            cache_key = f"{state.current_step.value}:{state.language}:{user_input[:50]}"
+            if cache_key in self._response_cache:
+                message = self._response_cache[cache_key]
+                logger.debug(f"Cache hit for: {cache_key[:30]}")
+            else:
+                response = self.client.chat.completions.create(
+                    model=settings.voice_agent_model if hasattr(settings, 'voice_agent_model') else "gpt-4o-mini",
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        *state.message_history[-4:],  # Reduced from 6 to 4 for lower cost
+                    ],
+                    max_tokens=100,  # Reduced from 150 - voice responses should be short
+                    temperature=0.7,
+                )
+                
+                message = response.choices[0].message.content.strip()
+                
+                # Cache response with size limit
+                if len(self._response_cache) >= self._cache_max_size:
+                    self._response_cache.pop(next(iter(self._response_cache)))
+                self._response_cache[cache_key] = message
             
         except Exception as e:
             logger.error(f"LLM call failed: {e}")

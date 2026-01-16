@@ -36,6 +36,8 @@ class RAGKnowledgeBase:
         self._chunks: list[KnowledgeChunk] = []
         self._embeddings: Optional[np.ndarray] = None
         self._initialized = False
+        self._query_cache: dict[str, np.ndarray] = {}  # Cache for query embeddings
+        self._cache_max_size = 100  # Limit cache size
     
     @property
     def client(self) -> OpenAI:
@@ -196,6 +198,7 @@ class RAGKnowledgeBase:
     ) -> list[KnowledgeChunk]:
         """
         Query the knowledge base for relevant chunks.
+        Uses vectorized operations for speed.
         
         Args:
             question: User's question or input
@@ -206,39 +209,56 @@ class RAGKnowledgeBase:
         Returns:
             List of most relevant knowledge chunks
         """
-        if not self._initialized or not self._chunks:
+        if not self._initialized or self._embeddings is None:
             logger.warning("Knowledge base not initialized")
             return []
         
-        try:
-            # Embed the query
-            response = self.client.embeddings.create(
-                model="text-embedding-3-small",
-                input=[question]
-            )
-            query_embedding = np.array(response.data[0].embedding)
-            
-        except Exception as e:
-            logger.error(f"Failed to embed query: {e}")
+        # Check cache first
+        cache_key = question[:100]  # Truncate for cache key
+        if cache_key in self._query_cache:
+            query_embedding = self._query_cache[cache_key]
+        else:
+            try:
+                response = self.client.embeddings.create(
+                    model="text-embedding-3-small",
+                    input=[question]
+                )
+                query_embedding = np.array(response.data[0].embedding)
+                
+                # Cache with size limit
+                if len(self._query_cache) >= self._cache_max_size:
+                    # Remove oldest entry
+                    self._query_cache.pop(next(iter(self._query_cache)))
+                self._query_cache[cache_key] = query_embedding
+                
+            except Exception as e:
+                logger.error(f"Failed to embed query: {e}")
+                return []
+        
+        # Build filter mask
+        mask = np.ones(len(self._chunks), dtype=bool)
+        for i, chunk in enumerate(self._chunks):
+            if language and chunk.language != language and chunk.language != "en":
+                mask[i] = False
+            if topic and chunk.topic != topic and chunk.topic != "general":
+                mask[i] = False
+        
+        # Vectorized similarity computation (much faster than loop)
+        if mask.sum() == 0:
             return []
         
-        # Calculate similarities
-        similarities = []
-        for i, chunk in enumerate(self._chunks):
-            # Apply filters
-            if language and chunk.language != language and chunk.language != "en":
-                continue
-            if topic and chunk.topic != topic and chunk.topic != "general":
-                continue
-            
-            if chunk.embedding is not None:
-                sim = self._cosine_similarity(query_embedding, chunk.embedding)
-                similarities.append((sim, i, chunk))
+        filtered_embeddings = self._embeddings[mask]
         
-        # Sort by similarity and return top_k
-        similarities.sort(reverse=True, key=lambda x: x[0])
+        # Compute all similarities at once using matrix operations
+        query_norm = np.linalg.norm(query_embedding)
+        embedding_norms = np.linalg.norm(filtered_embeddings, axis=1)
+        similarities = np.dot(filtered_embeddings, query_embedding) / (embedding_norms * query_norm + 1e-8)
         
-        return [chunk for _, _, chunk in similarities[:top_k]]
+        # Get top-k indices
+        filtered_indices = np.where(mask)[0]
+        top_indices = np.argsort(similarities)[-top_k:][::-1]
+        
+        return [self._chunks[filtered_indices[i]] for i in top_indices]
     
     def get_context_for_topic(self, topic: str, language: str = "en", max_chunks: int = 5) -> str:
         """
