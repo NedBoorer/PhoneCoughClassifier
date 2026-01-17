@@ -5,6 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Phone Cough Classifier</title>
     <link rel="stylesheet" href="/static/css/style.css">
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <style>
+        #map { height: 400px; width: 100%; border-radius: 8px; z-index: 1; }
+    </style>
 </head>
 <body>
     <header>
@@ -20,6 +27,12 @@
             <p>Click the button below to verify the connection to the backend API services.</p>
             <button id="check-health-btn">Check Health</button>
             <div id="status"></div>
+        </div>
+
+        <div class="card">
+            <h2>Epidemic Heatmap</h2>
+            <p>Real-time visualization of high-risk coughs by region.</p>
+            <div id="map"></div>
         </div>
 
         <div class="card">

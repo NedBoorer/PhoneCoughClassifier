@@ -26,6 +26,11 @@ class CallRecord(Base):
     call_duration = Column(Integer, default=0)  # seconds
     language = Column(String(10), default="en")  # en, hi, ta, te, bn, mr, gu, kn, ml, pa
     
+    # Location (from carrier/provider)
+    city = Column(String(50), nullable=True)
+    state = Column(String(50), nullable=True)
+    country = Column(String(50), nullable=True)
+    
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

@@ -262,3 +262,74 @@ async def verify_referral(
     
     return {"status": "success"}
 
+
+@router.get("/heatmap")
+async def get_heatmap_data(db: AsyncSession = Depends(get_session)):
+    """
+    Aggregate call data by location for the Epidemic Heatmap.
+    Returns list of {city, state, count, high_risk_count, lat, lon (mocked for now)}
+    """
+    from sqlalchemy import func
+    
+    # Aggregate by city and state
+    stmt = (
+        select(
+            CallRecord.city,
+            CallRecord.state,
+            func.count(CallRecord.id).label("total_calls"),
+            func.sum(
+                case(
+                    (ClassificationResult.severity.in_(["high", "severe", "urgent"]), 1),
+                    else_=0
+                )
+            ).label("high_risk_calls")
+        )
+        .join(CallRecord.classification)
+        .where(CallRecord.city.isnot(None))
+        .group_by(CallRecord.city, CallRecord.state)
+    )
+    
+    # We need 'case' from sqlalchemy
+    from sqlalchemy import case
+    
+    result = await db.execute(stmt)
+    rows = result.all()
+    
+    heatmap_data = []
+    
+    # Mock coordinates for Indian cities (since we don't have a geocoding DB yet)
+    # In a real app, we would use a geocoding service or store lat/lon on write
+    city_coords = {
+        "Delhi": [28.6139, 77.2090],
+        "Mumbai": [19.0760, 72.8777],
+        "Bangalore": [12.9716, 77.5946],
+        "Chennai": [13.0827, 80.2707],
+        "Kolkata": [22.5726, 88.3639],
+        "Hyderabad": [17.3850, 78.4867],
+        "Pune": [18.5204, 73.8567],
+        "Ahmedabad": [23.0225, 72.5714],
+        "Jaipur": [26.9124, 75.7873],
+        "Lucknow": [26.8467, 80.9462],
+        "Patna": [25.5941, 85.1376],
+        "Bhopal": [23.2599, 77.4126],
+        "Chandigarh": [30.7333, 76.7794],
+        "San Francisco": [37.7749, -122.4194], # For testing
+        "New York": [40.7128, -74.0060],
+        "London": [51.5074, -0.1278],
+    }
+    
+    for row in rows:
+        city = row.city
+        coords = city_coords.get(city, [20.5937, 78.9629]) # Default to center of India
+        
+        heatmap_data.append({
+            "city": city,
+            "state": row.state,
+            "count": row.total_calls,
+            "high_risk": row.high_risk_calls or 0,
+            "lat": coords[0],
+            "lng": coords[1]
+        })
+        
+    return heatmap_data
+

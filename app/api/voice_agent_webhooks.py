@@ -19,6 +19,8 @@ from app.services.voice_agent_service import (
 from app.services.twilio_service import get_twilio_service, format_sms_result
 from app.ml.model_hub import get_model_hub
 from app.utils.i18n import get_language_config
+from app.database.database import async_session_maker
+from app.database.models import CallRecord, ClassificationResult
 
 logger = logging.getLogger(__name__)
 
@@ -41,13 +43,16 @@ async def voice_agent_start(
     request: Request,
     CallSid: str = Form(...),
     From: str = Form(...),
+    FromCity: Optional[str] = Form(None),
+    FromState: Optional[str] = Form(None),
+    FromCountry: Optional[str] = Form(None),
 ):
     """
     Start a conversational voice agent call.
     
     This is the entry point for the voice agent flow.
     """
-    logger.info(f"Voice agent start: SID={CallSid}, From={From}")
+    logger.info(f"Voice agent start: SID={CallSid}, From={From}, Location={FromCity}, {FromState}")
     
     # Get query params for language override
     query_params = dict(request.query_params)
@@ -62,6 +67,9 @@ async def voice_agent_start(
     _call_states[CallSid] = {
         "caller_number": From,
         "language": language,
+        "city": FromCity,
+        "state": FromState,
+        "country": FromCountry,
     }
     
     # Get initial greeting
@@ -322,6 +330,43 @@ async def recording_complete(
             enable_parkinsons=settings.enable_parkinsons_screening,
             enable_depression=settings.enable_depression_screening,
         )
+
+        # --- SAVE TO DATABASE ---
+        try:
+            call_info = _call_states.get(CallSid, {})
+            async with async_session_maker() as db:
+                # Create Call Record
+                call_record = CallRecord(
+                    call_sid=CallSid,
+                    caller_number=call_info.get("caller_number", From),
+                    language=language,
+                    call_status="completed",
+                    recording_url=RecordingUrl,
+                    city=call_info.get("city"),
+                    state=call_info.get("state"),
+                    country=call_info.get("country")
+                )
+                db.add(call_record)
+                await db.flush()
+
+                # Create Classification Result
+                # Map overall risk to simple classification for the table
+                classification_str = result.primary_concern if result.primary_concern != "none" else "Normal"
+                
+                class_result = ClassificationResult(
+                    call_id=call_record.id,
+                    classification=classification_str,
+                    confidence=0.85 if result.overall_risk_level in ["high", "urgent"] else 0.95, # Mock confidence for aggregate
+                    severity=result.overall_risk_level,
+                    recommendation=result.recommendation,
+                    processing_time_ms=result.processing_time_ms
+                )
+                db.add(class_result)
+                await db.commit()
+                logger.info(f"Saved DB record for {CallSid}")
+        except Exception as db_err:
+            logger.error(f"Database save failed: {db_err}")
+        # ------------------------
         
         # Get agent state for personalized response
         agent = get_voice_agent_service()

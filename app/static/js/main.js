@@ -4,6 +4,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const checkHealthBtn = document.getElementById('check-health-btn');
     const statusDiv = document.getElementById('status');
 
+    // --- Health Check Logic ---
     if (checkHealthBtn) {
         checkHealthBtn.addEventListener('click', async () => {
             statusDiv.style.display = 'block';
@@ -27,6 +28,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Admin Panel Logic ---
     loadReferrals();
+    initMap();
 
     // --- Demo Analysis Logic ---
     const analyzeBtn = document.getElementById('analyze-btn');
@@ -68,6 +70,62 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 });
+
+async function initMap() {
+    const mapDiv = document.getElementById('map');
+    if (!mapDiv) return;
+
+    // Center on India
+    const map = L.map('map').setView([20.5937, 78.9629], 5);
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    }).addTo(map);
+
+    try {
+        const response = await fetch('/admin/heatmap');
+        let data = await response.json();
+
+        // Hack for Demo: If no data, show sample data
+        if (data.length === 0) {
+            console.log("No real data, showing demo heatmap data");
+            data = [
+                { city: "New Delhi", lat: 28.6139, lng: 77.2090, count: 15, high_risk: 5 },
+                { city: "Mumbai", lat: 19.0760, lng: 72.8777, count: 25, high_risk: 12 },
+                { city: "Bangalore", lat: 12.9716, lng: 77.5946, count: 8, high_risk: 1 }
+            ];
+        }
+
+        data.forEach(point => {
+            // Color based on % of high risk
+            const riskRatio = point.count > 0 ? (point.high_risk / point.count) : 0;
+            let color = '#22c55e'; // Green
+            if (riskRatio > 0.5) color = '#ef4444'; // Red
+            else if (riskRatio > 0.2) color = '#eab308'; // Yellow
+
+            // Radius based on total count
+            const radius = Math.max(10, Math.min(point.count * 2, 50)); 
+
+            const circle = L.circleMarker([point.lat, point.lng], {
+                color: color,
+                fillColor: color,
+                fillOpacity: 0.6,
+                radius: radius
+            }).addTo(map);
+
+            circle.bindPopup(
+                `
+                <b>${point.city}</b><br>
+                Total Calls: ${point.count}<br>
+                High Risk: ${point.high_risk}
+            `
+            );
+        });
+
+    } catch (error) {
+        console.error("Error loading heatmap:", error);
+    }
+}
 
 async function loadReferrals() {
     const tableBody = document.querySelector('#referral-table tbody');
