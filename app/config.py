@@ -88,6 +88,9 @@ class Settings(BaseSettings):
     max_no_input_attempts: int = 5  # Maximum no-input attempts before ending call
     max_recording_attempts: int = 3  # Maximum recording retry attempts
     max_family_screenings: int = 5  # Maximum family members to screen per call
+
+    # Model Preloading (eliminates first-call latency)
+    preload_models_on_startup: bool = True  # Preload models to avoid 30-60s delay on first call
     
     # Trust & Reliability
     trusted_authority_name: str = "District Health Mission"
