@@ -15,9 +15,6 @@ kill_timeout = "5s"
   # Use existing Dockerfile
   dockerfile = "Dockerfile"
 
-[deploy]
-  release_command = "python -c 'from app.database.database import init_db; import asyncio; asyncio.run(init_db())'"
-
 [env]
   # Application settings
   ENVIRONMENT = "production"

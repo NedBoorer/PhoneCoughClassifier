@@ -62,3 +62,10 @@ data/*.zip
 .gemini/
 .claude/
 .agent/
+
+# External models (too large for container - download at runtime if needed)
+external_models/
+
+# Jupyter notebooks
+*.ipynb
+.ipynb_checkpoints/
