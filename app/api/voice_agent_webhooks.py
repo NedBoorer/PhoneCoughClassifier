@@ -206,7 +206,7 @@ async def voice_agent_start(
     # Gather speech input
     gather = Gather(
         input="speech dtmf",  # Accept both speech and keypad
-        action=f"./process-speech?lang={language}&attempt=0",
+        action=f"/voice-agent/process-speech?lang={language}&attempt=0",
         timeout=settings.voice_agent_timeout if hasattr(settings, 'voice_agent_timeout') else 8,
         speech_timeout="auto",
         language=lang_code,
@@ -216,7 +216,7 @@ async def voice_agent_start(
     response.append(gather)
     
     # If no input, try again (max 2 attempts before fallback)
-    response.redirect(f"./no-input?lang={language}&attempt=1")
+    response.redirect(f"/voice-agent/no-input?lang={language}&attempt=1")
     
     return twiml_response(response)
 
@@ -265,7 +265,7 @@ async def process_speech(
         )
         # Skip to recording instead of hanging up
         state.current_step = ConversationStep.RECORDING
-        response.redirect(f"./continue?lang={language}&step=recording")
+        response.redirect(f"/voice-agent/continue?lang={language}&step=recording")
         return twiml_response(response)
     
     logger.info(f"Voice agent speech: SID={CallSid}, Input='{user_input}', Confidence={Confidence}")
@@ -289,7 +289,7 @@ async def process_speech(
             language=lang_code
         )
         # Fallback to recording instead of looping
-        response.redirect(f"./continue?lang={language}&step=recording")
+        response.redirect(f"/voice-agent/continue?lang={language}&step=recording")
         return twiml_response(response)
     
     voice, lang_code = _get_voice_config(language)
@@ -319,7 +319,7 @@ async def process_speech(
         )
         gather = Gather(
             input="speech dtmf",
-            action=f"./confirm-handoff?lang={language}",
+            action=f"/voice-agent/confirm-handoff?lang={language}",
             timeout=8,
             num_digits=1,
             speech_timeout="auto",
@@ -328,7 +328,7 @@ async def process_speech(
         )
         response.append(gather)
         # If no response, continue with cough recording instead
-        response.redirect(f"./continue?lang={language}&step=recording")
+        response.redirect(f"/voice-agent/continue?lang={language}&step=recording")
         return twiml_response(response)
     
     # Normal response - continue conversation
@@ -337,7 +337,7 @@ async def process_speech(
     # Gather next input (reset attempt counter on successful speech)
     gather = Gather(
         input="speech dtmf",
-        action=f"./process-speech?lang={language}&attempt=0",
+        action=f"/voice-agent/process-speech?lang={language}&attempt=0",
         timeout=settings.voice_agent_timeout if hasattr(settings, 'voice_agent_timeout') else 8,
         speech_timeout="auto",
         language=lang_code,
@@ -347,7 +347,7 @@ async def process_speech(
     response.append(gather)
     
     # Fallback if no input - increment attempt
-    response.redirect(f"./no-input?lang={language}&attempt=1")
+    response.redirect(f"/voice-agent/no-input?lang={language}&attempt=1")
     
     return twiml_response(response)
 
@@ -401,8 +401,7 @@ async def _handle_single_recording(
         max_length=settings.max_recording_duration,
         timeout=3,
         play_beep=True,
-        action=f"./recording-complete?lang={language}",
-        recording_status_callback=f"{settings.base_url}/twilio/voice/recording-status",
+        action=f"/voice-agent/recording-complete?lang={language}",
     )
 
     return twiml_response(response)
@@ -449,8 +448,7 @@ async def _handle_chunked_recording(
         max_length=chunk_duration,
         timeout=2,
         play_beep=True,
-        action=f"./recording-chunk-complete?lang={language}&chunk=1",
-        recording_status_callback=f"{settings.base_url}/twilio/voice/recording-status",
+        action=f"/voice-agent/recording-chunk-complete?lang={language}&chunk=1",
     )
 
     return twiml_response(response)
@@ -496,7 +494,7 @@ async def recording_chunk_complete(
 
         # Instead of immediately analyzing, mark that we need to combine chunks
         # and redirect to the normal recording-complete flow
-        response.redirect(f"./combine-and-analyze?lang={language}")
+        response.redirect(f"/voice-agent/combine-and-analyze?lang={language}")
         return twiml_response(response)
 
     # More chunks needed - give encouragement and continue
@@ -510,8 +508,7 @@ async def recording_chunk_complete(
         max_length=chunk_duration,
         timeout=2,
         play_beep=False,  # No beep for subsequent chunks (smoother)
-        action=f"./recording-chunk-complete?lang={language}&chunk={chunk_num + 1}",
-        recording_status_callback=f"{settings.base_url}/twilio/voice/recording-status",
+        action=f"/voice-agent/recording-chunk-complete?lang={language}&chunk={chunk_num + 1}",
     )
 
     return twiml_response(response)
@@ -547,7 +544,7 @@ async def combine_and_analyze(
             voice=voice,
             language=lang_code
         )
-        response.redirect(f"./continue?lang={language}&step=recording")
+        response.redirect(f"/voice-agent/continue?lang={language}&step=recording")
         return twiml_response(response)
 
     logger.info(f"Combining {len(chunk_urls)} chunks for {CallSid}")
@@ -581,7 +578,7 @@ async def combine_and_analyze(
         response.pause(length=1)
 
     # Check results
-    response.redirect(f"./check-results?lang={language}&attempt=1")
+    response.redirect(f"/voice-agent/check-results?lang={language}&attempt=1")
 
     return twiml_response(response)
 
@@ -712,7 +709,7 @@ async def recording_complete(
             voice=voice,
             language=lang_code
         )
-        response.redirect(f"./continue?lang={language}&step=recording")
+        response.redirect(f"/voice-agent/continue?lang={language}&step=recording")
         return twiml_response(response)
     
     # Thank you message immediately after recording
@@ -761,7 +758,7 @@ async def recording_complete(
 
     # By now, analysis should be complete or nearly complete
     # Redirect to check results
-    response.redirect(f"./check-results?lang={language}&attempt=1")
+    response.redirect(f"/voice-agent/check-results?lang={language}&attempt=1")
 
     return twiml_response(response)
 
@@ -874,7 +871,7 @@ async def family_decision(
                 voice=voice,
                 language=lang_code
             )
-            response.redirect(f"./goodbye?lang={language}")
+            response.redirect(f"/voice-agent/goodbye?lang={language}")
             return twiml_response(response)
 
         # Update family screening counter (thread-safe)
@@ -901,10 +898,10 @@ async def family_decision(
         response.pause(length=2)
         
         # Go to recording for next person
-        response.redirect(f"./continue?lang={language}&step=recording")
+        response.redirect(f"/voice-agent/continue?lang={language}&step=recording")
     else:
         # End call
-        response.redirect(f"./goodbye?lang={language}")
+        response.redirect(f"/voice-agent/goodbye?lang={language}")
     
     return twiml_response(response)
 
@@ -946,7 +943,7 @@ async def confirm_handoff(
             voice=voice,
             language=lang_code
         )
-        response.redirect(f"./continue?lang={language}&step=recording")
+        response.redirect(f"/voice-agent/continue?lang={language}&step=recording")
     
     return twiml_response(response)
 
@@ -970,7 +967,7 @@ async def continue_conversation(
     # Default: continue with conversation
     gather = Gather(
         input="speech dtmf",
-        action=f"./process-speech?lang={language}&attempt=0",
+        action=f"/voice-agent/process-speech?lang={language}&attempt=0",
         timeout=10,
         speech_timeout="auto",
         language=lang_code,
@@ -983,7 +980,7 @@ async def continue_conversation(
     )
     
     response.append(gather)
-    response.redirect(f"./no-input?lang={language}&attempt=1")
+    response.redirect(f"/voice-agent/no-input?lang={language}&attempt=1")
 
     return twiml_response(response)
 
@@ -1028,7 +1025,7 @@ async def handle_no_input(
             language=lang_code
         )
         # Guide to recording instead of hanging up
-        response.redirect(f"./continue?lang={language}&step=recording")
+        response.redirect(f"/voice-agent/continue?lang={language}&step=recording")
         return twiml_response(response)
     
     # Prompt message varies by attempt to avoid repetition
@@ -1043,7 +1040,7 @@ async def handle_no_input(
     # Gather with shorter timeout on retries
     gather = Gather(
         input="speech dtmf",
-        action=f"./process-speech?lang={language}&attempt={attempt}",
+        action=f"/voice-agent/process-speech?lang={language}&attempt={attempt}",
         timeout=6,  # Shorter timeout on retries
         speech_timeout="auto",
         language=lang_code,
@@ -1051,7 +1048,7 @@ async def handle_no_input(
     )
     
     response.append(gather)
-    response.redirect(f"./no-input?lang={language}&attempt={attempt + 1}")
+    response.redirect(f"/voice-agent/no-input?lang={language}&attempt={attempt + 1}")
     
     return twiml_response(response)
 
@@ -1096,7 +1093,7 @@ async def check_results(
                 voice=voice,
                 language=lang_code
             )
-            response.redirect(f"./goodbye?lang={language}")
+            response.redirect(f"/voice-agent/goodbye?lang={language}")
             return twiml_response(response)
 
         # Handle timeout case
@@ -1108,7 +1105,7 @@ async def check_results(
                 voice=voice,
                 language=lang_code
             )
-            response.redirect(f"./continue?lang={language}&step=recording")
+            response.redirect(f"/voice-agent/continue?lang={language}&step=recording")
             return twiml_response(response)
 
         # Present results (reusing existing logic)
@@ -1128,7 +1125,7 @@ async def check_results(
                 voice=voice,
                 language=lang_code
             )
-            response.redirect(f"./continue?lang={language}&step=recording")
+            response.redirect(f"/voice-agent/continue?lang={language}&step=recording")
         else:
             response.say(
                 "I had trouble analyzing your cough. Please try calling back later."
@@ -1137,7 +1134,7 @@ async def check_results(
                 voice=voice,
                 language=lang_code
             )
-            response.redirect(f"./goodbye?lang={language}")
+            response.redirect(f"/voice-agent/goodbye?lang={language}")
 
         return twiml_response(response)
 
@@ -1153,7 +1150,7 @@ async def check_results(
                 voice=voice,
                 language=lang_code
             )
-            response.redirect(f"./continue?lang={language}&step=recording")
+            response.redirect(f"/voice-agent/continue?lang={language}&step=recording")
             return twiml_response(response)
 
         # Still processing, give positive feedback and check again
@@ -1164,7 +1161,7 @@ async def check_results(
             language=lang_code
         )
         response.pause(length=2)
-        response.redirect(f"./check-results?lang={language}&attempt={attempt + 1}")
+        response.redirect(f"/voice-agent/check-results?lang={language}&attempt={attempt + 1}")
         return twiml_response(response)
 
 
@@ -1242,7 +1239,7 @@ async def _present_results(response, CallSid, From, result, language, voice, lan
 
     gather = Gather(
         input="speech dtmf",
-        action=f"./family-decision?lang={language}",
+        action=f"/voice-agent/family-decision?lang={language}",
         timeout=8,
         num_digits=1,
         speech_timeout="auto",
@@ -1260,7 +1257,7 @@ async def _present_results(response, CallSid, From, result, language, voice, lan
     response.append(gather)
 
     # Default to goodbye if no response
-    response.redirect(f"./goodbye?lang={language}")
+    response.redirect(f"/voice-agent/goodbye?lang={language}")
 
     return twiml_response(response)
 
