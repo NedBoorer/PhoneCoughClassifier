@@ -32,6 +32,7 @@ class ConversationStep(str, Enum):
     RESULTS = "results"
     FAMILY_OFFER = "family_offer"
     ASHA_HANDOFF = "asha_handoff"
+    SAFETY_SUPPORT = "safety_support"  # Domestic violence / abuse support
     GOODBYE = "goodbye"
 
 
@@ -133,26 +134,113 @@ class VoiceAgentService:
         topic = topic_map.get(state.current_step, "general")
         context = rag.get_context_for_topic(topic, state.language, max_chunks=3)
         
-        return f"""You are Swasth Saathi, a warm health companion on a phone call.
-        You work with {settings.trusted_authority_name} to help people.
-        Over {settings.mock_daily_users} people have used this service today.
+        # Build emotional state guidance based on conversation history
+        emotional_hints = self._detect_emotional_context(state)
+        
+        return f"""You are Swasth Saathi, a deeply caring and emotionally intelligent health companion on a phone call.
+You work with {settings.trusted_authority_name} to help people.
+Over {settings.mock_daily_users} people trust this service daily.
 
 LANGUAGE: {state.language}
 STEP: {state.current_step.value}
 INFO: {state.collected_info}
+CONVERSATION TURN: {state.turn_count}
 
-CRITICAL RULES:
-- MAXIMUM 1-2 SHORT sentences (phone call, not text!)
-- Ask ONE question at a time
-- Warm but BRIEF (use "Ji" if Hindi)
-- Never say AI/Robot - say "health service"
-- Emergency → call 108
-- If TB is mentioned, emphasize it's curable with free treatment (DOTS)
+🎭 EMOTIONAL INTELLIGENCE (CRITICAL):
+{emotional_hints}
+
+Listen carefully to HOW the user speaks, not just WHAT they say:
+- If they sound WORRIED/ANXIOUS → Be extra gentle and reassuring. "Don't worry, you did the right thing by calling."
+- If they sound SCARED/FEARFUL → Validate their fear first. "I understand this is frightening. I'm here with you."
+- If they mention PAIN/DISCOMFORT → Show genuine concern. "I'm so sorry you're going through this."
+- If they sound FRUSTRATED/IMPATIENT → Acknowledge and speed up. "I understand, let me help you quickly."
+- If they sound SAD/LOW → Be warm and comforting. "I hear you. You're not alone in this."
+- If they sound RELIEVED/HOPEFUL → Share their positivity. "That's wonderful to hear!"
+- If they seem CONFUSED → Be patient and clear. "Let me explain simply..."
+- If they are QUIET/HESITANT → Gently encourage. "Take your time. I'm listening."
+
+VOICE & TONE RULES:
+- MAXIMUM 1-2 SHORT sentences (this is a phone call, not text!)
+- Match the user's emotional energy - don't be cheerful when they're scared
+- Use warm expressions: "Ji", "beta/beti", "aap" (respectful) if Hindi
+- Acknowledge what they just said BEFORE moving forward
+- Never sound robotic or clinical - speak like a caring village health worker
+- Never say AI/Robot - say "health service" or "health friend"
+
+RESPONSE PATTERN:
+1. FIRST: Briefly acknowledge/validate what user said or how they feel
+2. THEN: Ask your ONE question or give your short guidance
+
+SAFETY:
+- Emergency symptoms → "Please call 108 immediately"
+- TB mention → "TB is completely curable with free DOTS treatment"
+- Domestic violence → Supportive, non-judgmental referral to helpline
 
 CONTEXT:
 {context[:300]}
 
-Reply with ONLY your short spoken response, no explanation."""
+Reply with ONLY your short, emotionally appropriate spoken response. No explanation."""
+
+    def _detect_emotional_context(self, state: ConversationState) -> str:
+        """Analyze conversation history to detect emotional cues and provide guidance"""
+        emotions_detected = []
+        guidance = []
+        
+        # Get recent user messages
+        recent_user_messages = [
+            msg.get("content", "").lower() 
+            for msg in state.message_history[-4:] 
+            if isinstance(msg, dict) and msg.get("role") == "user"
+        ]
+        combined_text = " ".join(recent_user_messages)
+        
+        # Emotional keyword detection (English + Hindi)
+        worry_words = ["worried", "worry", "anxious", "nervous", "tension", "chinta", "चिंता", "fikar", "फ़िक्र", "pareshan", "परेशान"]
+        pain_words = ["pain", "hurt", "hurts", "painful", "ache", "dard", "दर्द", "taklif", "तकलीफ़", "dukh", "दुख"]
+        fear_words = ["scared", "afraid", "fear", "frightened", "terrified", "dar", "डर", "bhay", "भय", "ghabra", "घबरा"]
+        frustration_words = ["frustrated", "angry", "annoyed", "irritated", "enough", "gussa", "गुस्सा", "tang", "तंग"]
+        sadness_words = ["sad", "depressed", "hopeless", "alone", "lonely", "crying", "dukhi", "दुखी", "udas", "उदास", "akela", "अकेला"]
+        relief_words = ["better", "relieved", "good", "okay", "fine", "theek", "ठीक", "acha", "अच्छा", "rahat", "राहत"]
+        confusion_words = ["don't understand", "confused", "what", "kya", "क्या", "samajh nahi", "समझ नहीं"]
+        
+        if any(word in combined_text for word in worry_words):
+            emotions_detected.append("WORRIED")
+            guidance.append("User seems anxious - be extra reassuring and gentle")
+        
+        if any(word in combined_text for word in pain_words):
+            emotions_detected.append("IN PAIN")
+            guidance.append("User is experiencing discomfort - show genuine concern")
+        
+        if any(word in combined_text for word in fear_words):
+            emotions_detected.append("FEARFUL")
+            guidance.append("User is scared - validate their feelings first")
+        
+        if any(word in combined_text for word in frustration_words):
+            emotions_detected.append("FRUSTRATED")
+            guidance.append("User seems impatient - be efficient and understanding")
+        
+        if any(word in combined_text for word in sadness_words):
+            emotions_detected.append("SAD")
+            guidance.append("User sounds low - be warm and supportive")
+        
+        if any(word in combined_text for word in relief_words):
+            emotions_detected.append("POSITIVE/RELIEVED")
+            guidance.append("User sounds positive - mirror their energy")
+        
+        if any(word in combined_text for word in confusion_words):
+            emotions_detected.append("CONFUSED")
+            guidance.append("User seems confused - explain clearly and simply")
+        
+        # Check for short/hesitant responses (possible nervousness)
+        if recent_user_messages and len(recent_user_messages[-1]) < 15:
+            if "POSITIVE" not in str(emotions_detected):
+                guidance.append("User is giving short responses - gently encourage them to share more")
+        
+        # Build output
+        if emotions_detected:
+            return f"DETECTED EMOTIONS: {', '.join(emotions_detected)}\nGUIDANCE: {'; '.join(guidance)}"
+        else:
+            return "No strong emotions detected yet - maintain warm, friendly tone"
 
     def _determine_next_step(
         self,
@@ -161,15 +249,33 @@ Reply with ONLY your short spoken response, no explanation."""
         extracted_info: dict
     ) -> ConversationStep:
         """Determine the next conversation step - always progresses toward recording"""
+        user_lower = user_input.lower()
         
-        # Check for Handoff Intents FIRST (Safety Net - always active)
+        # SAFETY CHECK FIRST - Domestic violence / abuse detection (highest priority)
+        # Keywords in English and Hindi for violence, abuse, fear of husband/family
+        safety_keywords = [
+            # English
+            "violence", "violent", "abuse", "abused", "abusive", "beat", "beaten", "beating",
+            "hit", "hitting", "hurt", "hurting", "scared", "afraid", "fear", "threatening",
+            "husband beat", "husband hit", "he beats", "he hits", "attack", "assault",
+            "domestic", "help me", "save me", "danger", "unsafe", "trapped",
+            # Hindi / Hinglish
+            "maarta", "marta", "maarpeet", "maar peet", "hinsa", "हिंसा",
+            "पिटाई", "मारता", "मारती", "मारपीट", "डर", "dar", "darr",
+            "pati maarta", "पति मारता", "sasural", "ससुराल", "torture",
+            "bachao", "बचाओ", "madad", "मदद करो", "khatara", "खतरा"
+        ]
+        if any(kw in user_lower for kw in safety_keywords):
+            return ConversationStep.SAFETY_SUPPORT
+        
+        # Check for Handoff Intents (Safety Net - always active)
         human_keywords = ["human", "person", "doctor", "talk to", "real person", "fake", "robot", "insaan", "baat karni", "asli", "asha"]
-        if any(kw in user_input.lower() for kw in human_keywords):
+        if any(kw in user_lower for kw in human_keywords):
             return ConversationStep.ASHA_HANDOFF
         
         # Fast-track to recording if user mentions cough - go directly to RECORDING
         cough_keywords = ["cough", "khansi", "खांसी", "record", "check", "coughing", "khaans", "khasi", "test", "screen"]
-        if any(kw in user_input.lower() for kw in cough_keywords) and current_step not in [ConversationStep.RECORDING, ConversationStep.PROCESSING, ConversationStep.RESULTS]:
+        if any(kw in user_lower for kw in cough_keywords) and current_step not in [ConversationStep.RECORDING, ConversationStep.PROCESSING, ConversationStep.RESULTS]:
             return ConversationStep.RECORDING
         
         # Streamlined flow - always progress toward recording
@@ -285,10 +391,14 @@ Reply with ONLY your short spoken response, no explanation."""
         if rag_context:
             system_prompt += f"\n\nADDITIONAL CONTEXT FOR THIS RESPONSE:\n{rag_context}"
         
+        # Detect if user is emotional - skip cache for empathetic responses
+        emotional_context = self._detect_emotional_context(state)
+        has_emotions = "DETECTED EMOTIONS:" in emotional_context
+        
         try:
-            # Check cache for similar inputs (reduces API calls and latency)
+            # Check cache for similar inputs (but skip cache when user is emotional)
             cache_key = f"{state.current_step.value}:{state.language}:{user_input[:50]}"
-            if cache_key in self._response_cache:
+            if cache_key in self._response_cache and not has_emotions:
                 message = self._response_cache[cache_key]
                 logger.debug(f"Cache hit for: {cache_key[:30]}")
             else:
@@ -306,8 +416,8 @@ Reply with ONLY your short spoken response, no explanation."""
                     lambda: self.client.chat.completions.create(
                         model=settings.voice_agent_model if hasattr(settings, 'voice_agent_model') else "gpt-4o-mini",
                         messages=messages,
-                        max_tokens=60,
-                        temperature=0.6,
+                        max_tokens=80,  # Increased for empathetic responses
+                        temperature=0.75,  # Higher for more natural, varied responses
                         timeout=10.0,
                     )
                 )

@@ -62,6 +62,7 @@ class Settings(BaseSettings):
 
     # Rural India Accessibility
     doctor_helpline_number: str = "+910000000000"  # Placeholder eSanjeevani or similar
+    women_helpline_number: str = "181"  # National Women Helpline India (Toll-free)
     enable_whatsapp_reports: bool = True
     high_risk_threshold: float = 0.85
     missed_call_callback_enabled: bool = True

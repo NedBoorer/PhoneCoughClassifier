@@ -359,6 +359,48 @@ async def process_speech(
         response.redirect(f"/voice-agent/continue?lang={language}&step=recording")
         return twiml_response(response)
     
+    # Special handling for SAFETY SUPPORT - domestic violence / abuse detection
+    if agent_response.next_step == ConversationStep.SAFETY_SUPPORT:
+        logger.warning(f"SAFETY TRIGGER for {CallSid} - routing to support services")
+        
+        # Compassionate, non-judgmental response
+        if language == "hi":
+            safety_message = (
+                "मैं समझती हूं। आप अकेली नहीं हैं और यह आपकी गलती नहीं है। "
+                "महिला हेल्पलाइन 181 पर कॉल करें - यह मुफ्त और गोपनीय है। "
+                "क्या आप चाहती हैं कि मैं आपको अभी जोड़ दूं? हां के लिए 1 दबाएं।"
+            )
+        else:
+            safety_message = (
+                "I understand. You are not alone, and this is not your fault. "
+                "The Women Helpline 181 is free and confidential. "
+                "Would you like me to connect you now? Press 1 for yes."
+            )
+        
+        response.say(safety_message, voice=voice, language=lang_code)
+        
+        gather = Gather(
+            input="speech dtmf",
+            action=f"/voice-agent/confirm-safety-connect?lang={language}",
+            timeout=10,
+            num_digits=1,
+            speech_timeout="auto",
+            language=lang_code,
+            hints="yes, no, haan, nahi, 1, 2",
+        )
+        response.append(gather)
+        
+        # If no response, provide the number again and continue
+        response.say(
+            "Remember, you can always call 181 for help. Take care of yourself."
+            if language == "en" else
+            "याद रखिए, आप कभी भी 181 पर कॉल कर सकती हैं। अपना ख्याल रखिए।",
+            voice=voice,
+            language=lang_code
+        )
+        response.redirect(f"/voice-agent/continue?lang={language}&step=recording")
+        return twiml_response(response)
+    
     # Normal response - continue conversation
     response.say(agent_response.message, voice=voice, language=lang_code)
     
@@ -995,6 +1037,49 @@ async def confirm_handoff(
             "No problem! Let's continue with your health check."
             if language == "en" else
             "कोई बात नहीं! आइए आपकी सेहत जांच जारी रखें।",
+            voice=voice,
+            language=lang_code
+        )
+        response.redirect(f"/voice-agent/continue?lang={language}&step=recording")
+    
+    return twiml_response(response)
+
+
+@router.post("/confirm-safety-connect")
+async def confirm_safety_connect(
+    request: Request,
+    CallSid: str = Form(...),
+    SpeechResult: Optional[str] = Form(None),
+    Digits: Optional[str] = Form(None),
+):
+    """Handle confirmation for connecting to Women Helpline (181) for domestic violence support"""
+    query_params = dict(request.query_params)
+    language = query_params.get("lang", "en")
+    
+    user_input = (SpeechResult or "").lower()
+    voice, lang_code = _get_voice_config(language)
+    
+    response = VoiceResponse()
+    
+    # Check for yes response
+    yes_indicators = ["yes", "1", "haan", "हां", "one", "ek", "connect", "help"]
+    if Digits == "1" or any(ind in user_input for ind in yes_indicators):
+        logger.info(f"Connecting {CallSid} to Women Helpline 181")
+        response.say(
+            "Connecting you to the Women Helpline now. Stay safe."
+            if language == "en" else
+            "आपको महिला हेल्पलाइन से जोड़ रही हूं। सुरक्षित रहें।",
+            voice=voice,
+            language=lang_code
+        )
+        # Dial the Women Helpline
+        response.dial(settings.women_helpline_number)
+    else:
+        # User said no - provide number and continue
+        response.say(
+            "That's okay. Remember, you can dial 181 anytime for free confidential help. Let's continue."
+            if language == "en" else
+            "ठीक है। याद रखिए, आप कभी भी 181 पर मुफ्त गोपनीय मदद के लिए कॉल कर सकती हैं। चलिए आगे बढ़ते हैं।",
             voice=voice,
             language=lang_code
         )
