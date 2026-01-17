@@ -10,7 +10,6 @@ from typing import Optional
 from enum import Enum
 
 from openai import OpenAI
-import logging
 
 from app.config import settings
 from app.services.rag_service import get_rag_service
