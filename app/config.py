@@ -34,8 +34,8 @@ class Settings(BaseSettings):
 
     # Multi-chunk recording for better UX (encouragement between chunks)
     enable_chunked_recording: bool = True  # Record in chunks with encouragement
-    recording_chunk_duration: int = 3  # Seconds per chunk (3-4 seconds ideal)
-    max_recording_chunks: int = 3  # Number of chunks (3 chunks × 3s = ~9s total)
+    recording_chunk_duration: int = 5  # Seconds per chunk (3-4 seconds ideal)
+    max_recording_chunks: int = 2  # Number of chunks (3 chunks × 3s = ~9s total)
     
     # ML Model
     model_path: str = "./models/cough_classifier.joblib"

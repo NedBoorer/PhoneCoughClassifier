@@ -18,6 +18,7 @@ from app.services.voice_agent_service import (
 )
 from app.services.twilio_service import get_twilio_service, format_sms_result
 from app.ml.model_hub import get_model_hub
+from app.utils import i18n
 from app.utils.i18n import get_language_config
 from app.database.database import async_session_maker
 from app.database.models import CallRecord, ClassificationResult
@@ -113,22 +114,12 @@ def _get_encouragement_messages(language: str, chunk_number: int) -> str:
     Returns:
         Encouraging message string
     """
-    if language == "hi":
-        messages = [
-            "बहुत अच्छा! चलते रहें...",  # Very good! Keep going...
-            "शानदार! बस थोड़ा और...",   # Excellent! Just a bit more...
-            "बिल्कुल सही! लगभग हो गया...",  # Perfect! Almost done...
-        ]
-    else:
-        messages = [
-            "Great! Keep going...",
-            "Perfect! A little more...",
-            "Excellent! Almost done...",
-        ]
-
-    # Return appropriate message based on chunk number (1-indexed)
-    idx = min(chunk_number - 1, len(messages) - 1)
-    return messages[idx]
+    # Select key based on chunk number (1, 2, 3)
+    # Map chunk number to i18n key suffix
+    key_suffix = min(chunk_number, 3)
+    i18n_key = f"va_encouragement_{key_suffix}"
+    
+    return i18n.get_text(i18n_key, language)
 
 
 def _get_health_tips(language: str, duration_seconds: int = 10) -> list[str]:

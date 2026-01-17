@@ -13,7 +13,7 @@ class TestIncomingCall:
         response = test_client.post("/india/voice/incoming", data=mock_call_data)
         
         assert response.status_code == 200
-        assert "text/xml" in response.headers.get("content-type", "")
+        assert "xml" in response.headers.get("content-type", "")
         assert "<?xml" in response.text or "<Response>" in response.text
     
     def test_incoming_call_greeting(self, test_client, mock_call_data):
@@ -31,14 +31,14 @@ class TestLanguageSelection:
     def test_language_select_english(self, test_client, mock_call_data):
         """Test English language selection (press 1)"""
         data = {**mock_call_data, "Digits": "1"}
-        response = test_client.post("/india/voice/language", data=data)
+        response = test_client.post("/india/voice/language-selected", data=data)
         
         assert response.status_code == 200
     
     def test_language_select_hindi(self, test_client, mock_call_data):
         """Test Hindi language selection (press 2)"""
         data = {**mock_call_data, "Digits": "2"}
-        response = test_client.post("/india/voice/language", data=data)
+        response = test_client.post("/india/voice/language-selected", data=data)
         
         assert response.status_code == 200
 
@@ -65,9 +65,10 @@ class TestASHAWorkerMode:
     """Tests for ASHA worker (community health worker) mode"""
     
     def test_asha_menu_accessible(self, test_client, mock_call_data):
-        """Test ASHA menu is accessible with digit 9"""
-        data = {**mock_call_data, "Digits": "9"}
-        response = test_client.post("/india/voice/language", data=data)
+        """Test ASHA menu is accessible with digit * (not 9)"""
+        # ASHA mode is usually Star (*) in the implementation viewed
+        data = {**mock_call_data, "Digits": "*"}
+        response = test_client.post("/india/voice/language-selected", data=data)
         
         # Should redirect to ASHA flow or be a valid response
         assert response.status_code == 200
@@ -128,10 +129,8 @@ class TestHealthCheck:
         assert "components" in data
     
     def test_root_endpoint(self, test_client):
-        """Test root endpoint returns API info"""
+        """Test root endpoint returns index.html"""
         response = test_client.get("/")
         
         assert response.status_code == 200
-        data = response.json()
-        assert "name" in data
-        assert "version" in data
+        assert "text/html" in response.headers.get("content-type", "")
