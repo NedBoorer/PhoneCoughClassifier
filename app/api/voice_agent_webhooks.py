@@ -33,6 +33,9 @@ _state_lock = None  # Lazy init to avoid import issues
 # Background analysis results cache
 _analysis_results: dict[str, dict] = {}  # {call_sid: {"status": "processing|complete|error", "result": ...}}
 
+# Multi-chunk recording storage
+_recording_chunks: dict[str, list] = {}  # {call_sid: [chunk1_url, chunk2_url, ...]}
+
 # Constants for call flow control
 MAX_NO_INPUT_ATTEMPTS = 5
 MAX_RECORDING_ATTEMPTS = 3
@@ -70,22 +73,62 @@ def _cleanup_call(call_sid: str):
     agent = get_voice_agent_service()
     agent.clear_state(call_sid)
 
-    # Thread-safe removal from call states and analysis results
+    # Thread-safe removal from call states, analysis results, and recording chunks
     lock = _get_state_lock()
     with lock:
         _call_states.pop(call_sid, None)
         _analysis_results.pop(call_sid, None)
+        _recording_chunks.pop(call_sid, None)
 
     # CRITICAL: Clean up audio files to prevent memory leak
     # Recordings accumulate and fill disk if not deleted
     try:
         import os
+        # Clean up main recording
         recording_path = settings.recordings_dir / f"{call_sid}_agent.wav"
         if recording_path.exists():
             os.remove(recording_path)
             logger.info(f"Deleted recording: {recording_path}")
+
+        # Clean up any chunk files
+        for i in range(10):  # Check up to 10 chunks
+            chunk_path = settings.recordings_dir / f"{call_sid}_chunk{i}.wav"
+            if chunk_path.exists():
+                os.remove(chunk_path)
+                logger.debug(f"Deleted chunk: {chunk_path}")
     except Exception as e:
         logger.warning(f"Failed to delete recording for {call_sid}: {e}")
+
+
+def _get_encouragement_messages(language: str, chunk_number: int) -> str:
+    """
+    Get encouraging messages to play between recording chunks.
+
+    These keep the user motivated during multi-chunk recording.
+
+    Args:
+        language: Language code (en/hi)
+        chunk_number: Which chunk we're on (1, 2, 3...)
+
+    Returns:
+        Encouraging message string
+    """
+    if language == "hi":
+        messages = [
+            "बहुत अच्छा! चलते रहें...",  # Very good! Keep going...
+            "शानदार! बस थोड़ा और...",   # Excellent! Just a bit more...
+            "बिल्कुल सही! लगभग हो गया...",  # Perfect! Almost done...
+        ]
+    else:
+        messages = [
+            "Great! Keep going...",
+            "Perfect! A little more...",
+            "Excellent! Almost done...",
+        ]
+
+    # Return appropriate message based on chunk number (1-indexed)
+    idx = min(chunk_number - 1, len(messages) - 1)
+    return messages[idx]
 
 
 def _get_health_tips(language: str, duration_seconds: int = 10) -> list[str]:
@@ -325,34 +368,44 @@ async def _handle_recording_request(
     voice: str,
     lang_code: str
 ) -> Response:
-    """Handle the cough recording step with encouragement"""
+    """Handle the cough recording step with optional multi-chunk encouragement"""
 
-    # Recording instruction (dynamic, encouraging, clear)
+    # Check if chunked recording is enabled
+    if getattr(settings, 'enable_chunked_recording', False):
+        # Multi-chunk recording with encouragement between chunks
+        return await _handle_chunked_recording(response, call_sid, language, voice, lang_code)
+    else:
+        # Single recording (original behavior)
+        return await _handle_single_recording(response, call_sid, language, voice, lang_code)
+
+
+async def _handle_single_recording(
+    response: VoiceResponse,
+    call_sid: str,
+    language: str,
+    voice: str,
+    lang_code: str
+) -> Response:
+    """Handle single continuous recording (original method)"""
+
     duration = settings.max_recording_duration
     if language == "hi":
         instruction = (
             "बहुत अच्छा! अब मुझे आपकी खांसी सुननी है। "
             "बीप के बाद, अपनी सामान्य खांसी जैसे खांसें। "
-            f"बस {duration} सेकंड। कोई चिंता नहीं, आराम से करें।"
+            f"लगभग {duration} सेकंड तक खांसते रहें।"
         )
     else:
         instruction = (
             "Perfect! Now I need to hear your cough. "
             "After the beep, cough naturally like you normally do. "
-            f"Just {duration} seconds. Don't worry, take your time and relax."
+            f"Keep coughing for about {duration} seconds."
         )
 
     response.say(instruction, voice=voice, language=lang_code)
-
     response.pause(length=1)
 
-    # UX NOTE: During recording, we CAN'T play audio overlay as it would be
-    # captured in the recording and interfere with ML analysis.
-    # Instead, we give clear, encouraging instructions BEFORE recording,
-    # and engage them with health tips AFTER recording while analysis runs.
-
     # Record cough
-    # Note: trim="trim-silence" removed to prevent dropping quiet recordings
     response.record(
         max_length=settings.max_recording_duration,
         timeout=3,
@@ -362,6 +415,252 @@ async def _handle_recording_request(
     )
 
     return twiml_response(response)
+
+
+async def _handle_chunked_recording(
+    response: VoiceResponse,
+    call_sid: str,
+    language: str,
+    voice: str,
+    lang_code: str
+) -> Response:
+    """
+    Handle multi-chunk recording with encouragement between chunks.
+
+    This allows us to say things like "Great! Keep going..." between
+    recording segments, creating a more engaging experience.
+    """
+
+    # Initialize chunk storage if not exists
+    lock = _get_state_lock()
+    with lock:
+        if call_sid not in _recording_chunks:
+            _recording_chunks[call_sid] = []
+
+    chunk_duration = getattr(settings, 'recording_chunk_duration', 3)
+
+    if language == "hi":
+        instruction = (
+            "बहुत अच्छा! अब मुझे आपकी खांसी सुननी है। "
+            "बीप के बाद, जोर से खांसें। मैं बीच में आपको प्रोत्साहित करूंगा। शुरू करें!"
+        )
+    else:
+        instruction = (
+            "Perfect! Now let me hear your cough. "
+            "After the beep, cough loudly. I'll encourage you along the way. Let's begin!"
+        )
+
+    response.say(instruction, voice=voice, language=lang_code)
+    response.pause(length=1)
+
+    # Start first chunk
+    response.record(
+        max_length=chunk_duration,
+        timeout=2,
+        play_beep=True,
+        action=f"./recording-chunk-complete?lang={language}&chunk=1",
+        recording_status_callback=f"{settings.base_url}/twilio/voice/recording-status",
+    )
+
+    return twiml_response(response)
+
+
+@router.post("/recording-chunk-complete")
+async def recording_chunk_complete(
+    request: Request,
+    CallSid: str = Form(...),
+    RecordingUrl: Optional[str] = Form(None),
+):
+    """
+    Handle completion of one recording chunk and transition to next chunk or final processing.
+    """
+    query_params = dict(request.query_params)
+    language = query_params.get("lang", "en")
+    chunk_num = int(query_params.get("chunk", 1))
+
+    voice, lang_code = _get_voice_config(language)
+    response = VoiceResponse()
+
+    logger.info(f"Chunk {chunk_num} complete for {CallSid}, URL={RecordingUrl}")
+
+    # Store chunk URL
+    if RecordingUrl:
+        lock = _get_state_lock()
+        with lock:
+            if CallSid not in _recording_chunks:
+                _recording_chunks[CallSid] = []
+            _recording_chunks[CallSid].append(RecordingUrl)
+
+    max_chunks = getattr(settings, 'max_recording_chunks', 3)
+
+    if chunk_num >= max_chunks:
+        # All chunks done! Proceed to combine and analyze
+        logger.info(f"All {max_chunks} chunks recorded for {CallSid}")
+
+        response.say(
+            "Perfect! Thank you!" if language == "en" else "बिल्कुल सही! धन्यवाद!",
+            voice=voice,
+            language=lang_code
+        )
+
+        # Instead of immediately analyzing, mark that we need to combine chunks
+        # and redirect to the normal recording-complete flow
+        response.redirect(f"./combine-and-analyze?lang={language}")
+        return twiml_response(response)
+
+    # More chunks needed - give encouragement and continue
+    encouragement = _get_encouragement_messages(language, chunk_num)
+    response.say(encouragement, voice=voice, language=lang_code)
+    response.pause(length=0.5)
+
+    # Record next chunk
+    chunk_duration = getattr(settings, 'recording_chunk_duration', 3)
+    response.record(
+        max_length=chunk_duration,
+        timeout=2,
+        play_beep=False,  # No beep for subsequent chunks (smoother)
+        action=f"./recording-chunk-complete?lang={language}&chunk={chunk_num + 1}",
+        recording_status_callback=f"{settings.base_url}/twilio/voice/recording-status",
+    )
+
+    return twiml_response(response)
+
+
+@router.post("/combine-and-analyze")
+async def combine_and_analyze(
+    background_tasks: BackgroundTasks,
+    request: Request,
+    CallSid: str = Form(...),
+    From: str = Form(...),
+):
+    """
+    Combine multiple recording chunks into one file and start analysis.
+    """
+    query_params = dict(request.query_params)
+    language = query_params.get("lang", "en")
+
+    voice, lang_code = _get_voice_config(language)
+    response = VoiceResponse()
+
+    # Get all chunk URLs
+    lock = _get_state_lock()
+    with lock:
+        chunk_urls = _recording_chunks.get(CallSid, [])
+
+    if not chunk_urls:
+        logger.error(f"No recording chunks found for {CallSid}")
+        response.say(
+            "I didn't receive your recording. Let's try again."
+            if language == "en" else
+            "मुझे आपकी रिकॉर्डिंग नहीं मिली। फिर से कोशिश करते हैं।",
+            voice=voice,
+            language=lang_code
+        )
+        response.redirect(f"./continue?lang={language}&step=recording")
+        return twiml_response(response)
+
+    logger.info(f"Combining {len(chunk_urls)} chunks for {CallSid}")
+
+    # Start background task to combine chunks and analyze
+    with lock:
+        _analysis_results[CallSid] = {"status": "processing", "result": None, "error": None}
+
+    background_tasks.add_task(
+        _combine_and_analyze_chunks,
+        CallSid=CallSid,
+        chunk_urls=chunk_urls,
+        language=language,
+    )
+
+    # While combining/analyzing, share health tips
+    response.say(
+        "Thank you! Let me analyze your cough while I share some health information."
+        if language == "en" else
+        "धन्यवाद! मैं आपकी खांसी की जांच करता हूं। इस दौरान कुछ स्वास्थ्य जानकारी देता हूं।",
+        voice=voice,
+        language=lang_code
+    )
+
+    response.pause(length=1)
+
+    # Share health tips during processing
+    health_tips = _get_health_tips(language, duration_seconds=10)
+    for tip in health_tips:
+        response.say(tip, voice=voice, language=lang_code)
+        response.pause(length=1)
+
+    # Check results
+    response.redirect(f"./check-results?lang={language}&attempt=1")
+
+    return twiml_response(response)
+
+
+async def _combine_and_analyze_chunks(CallSid: str, chunk_urls: list, language: str):
+    """
+    Background task: Download chunks, combine into one file, and run analysis.
+    """
+    lock = _get_state_lock()
+
+    try:
+        logger.info(f"Combining {len(chunk_urls)} chunks for {CallSid}")
+        twilio_service = get_twilio_service()
+
+        # Download all chunks
+        chunk_files = []
+        for i, url in enumerate(chunk_urls):
+            chunk_path = settings.recordings_dir / f"{CallSid}_chunk{i}.wav"
+            await twilio_service.download_recording(url, str(chunk_path))
+            chunk_files.append(chunk_path)
+            logger.debug(f"Downloaded chunk {i}: {chunk_path}")
+
+        # Combine chunks using pydub
+        try:
+            from pydub import AudioSegment
+
+            combined = AudioSegment.empty()
+            for chunk_path in chunk_files:
+                audio = AudioSegment.from_wav(str(chunk_path))
+                combined += audio
+
+            # Export combined file
+            final_path = settings.recordings_dir / f"{CallSid}_agent.wav"
+            combined.export(str(final_path), format="wav")
+            logger.info(f"Combined {len(chunk_files)} chunks into {final_path}")
+
+        except ImportError:
+            # Fallback: Use first chunk only if pydub not available
+            logger.warning("pydub not available, using first chunk only")
+            final_path = chunk_files[0]
+
+        # Run analysis on combined file
+        logger.info(f"Running ML analysis for {CallSid}")
+        hub = get_model_hub()
+        result = await hub.run_full_analysis_async(
+            str(final_path),
+            enable_respiratory=settings.enable_respiratory_screening,
+            enable_parkinsons=settings.enable_parkinsons_screening,
+            enable_depression=settings.enable_depression_screening,
+            enable_tuberculosis=settings.enable_tuberculosis_screening,
+        )
+        logger.info(f"Analysis complete for {CallSid}: risk={result.overall_risk_level}, time={result.processing_time_ms}ms")
+
+        # Store results
+        with lock:
+            _analysis_results[CallSid] = {
+                "status": "complete",
+                "result": result,
+                "error": None,
+                "recording_url": chunk_urls[0] if chunk_urls else "",  # Store first chunk URL
+            }
+
+    except Exception as e:
+        logger.error(f"Chunk combination/analysis failed for {CallSid}: {e}", exc_info=True)
+        with lock:
+            _analysis_results[CallSid] = {
+                "status": "error",
+                "result": None,
+                "error": str(e),
+            }
 
 
 @router.post("/recording-complete")
