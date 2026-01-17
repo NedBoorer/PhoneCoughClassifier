@@ -235,6 +235,14 @@ if settings.enable_whatsapp_bot:
     except ImportError as e:
         logger.warning(f"WhatsApp webhooks not loaded: {e}")
 
+# Medical Report Generation
+try:
+    from app.api.medical_report_endpoints import router as medical_report_router
+    app.include_router(medical_report_router, tags=["Medical Reports"])
+    logger.info("✓ Medical report endpoints loaded")
+except ImportError as e:
+    logger.warning(f"Medical report endpoints not loaded: {e}")
+
 
 # ==================
 # Static Files

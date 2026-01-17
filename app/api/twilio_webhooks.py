@@ -133,6 +133,23 @@ async def run_comprehensive_analysis(
         print(f"DEBUG: Sending SMS to {caller_number}: {sms_message[:50]}...")
         twilio_service.send_sms(caller_number, sms_message)
         print("DEBUG: SMS sent.")
+        
+        # Also send brief medical report for doctor (as second message)
+        print("DEBUG: Generating medical report...")
+        from app.services.twilio_service import format_medical_report
+        try:
+            medical_report = format_medical_report(
+                comprehensive_result=result,
+                patient_phone=caller_number,
+                report_type="brief"
+            )
+            
+            # Send medical report with header
+            intro_msg = "📋 MEDICAL REPORT FOR DOCTOR:\n" + "="*40 + "\n"
+            twilio_service.send_sms(caller_number, intro_msg + medical_report)
+            print("DEBUG: Medical report sent.")
+        except Exception as report_error:
+            logger.warning(f"Could not send medical report: {report_error}")
 
     except Exception as e:
         print(f"DEBUG: CRITICAL ERROR in analysis: {e}")

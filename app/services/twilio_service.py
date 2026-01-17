@@ -253,6 +253,47 @@ def format_sms_result(
     return message
 
 
+def format_medical_report(
+    comprehensive_result: 'ComprehensiveHealthResult',
+    patient_phone: str,
+    report_type: str = "brief"  # "brief" or "detailed"
+) -> str:
+    """
+    Format a medical report for doctors.
+    
+    Args:
+        comprehensive_result: Health screening result
+        patient_phone: Patient phone number
+        report_type: "brief" for SMS-friendly, "detailed" for printable
+        
+    Returns:
+        Formatted medical report
+    """
+    from app.utils.medical_report import (
+        generate_medical_report,
+        generate_short_medical_summary,
+        generate_printable_report
+    )
+    
+    if report_type == "brief":
+        return generate_medical_report(
+            result=comprehensive_result,
+            patient_phone=patient_phone,
+            language="en",
+            include_biomarkers=True
+        )
+    elif report_type == "summary":
+        return generate_short_medical_summary(
+            result=comprehensive_result,
+            max_length=500
+        )
+    else:  # detailed
+        return generate_printable_report(
+            result=comprehensive_result,
+            patient_phone=patient_phone
+        )
+
+
 # Singleton instance
 _service = None
 
