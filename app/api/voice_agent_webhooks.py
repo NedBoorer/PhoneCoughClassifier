@@ -76,24 +76,17 @@ async def voice_agent_start(
     # Gather speech input
     gather = Gather(
         input="speech dtmf",  # Accept both speech and keypad
-        action=f"./process-speech?lang={language}",
-        timeout=settings.voice_agent_timeout if hasattr(settings, 'voice_agent_timeout') else 10,
+        action=f"./process-speech?lang={language}&attempt=0",
+        timeout=settings.voice_agent_timeout if hasattr(settings, 'voice_agent_timeout') else 8,
         speech_timeout="auto",
         language=lang_code,
         hints="farmer, kisan, cough, khasi, yes, no, haan, nahi",
     )
     
-    # Fallback prompt if no input
-    gather.say(
-        "I'm listening..." if language == "en" else "मैं सुन रहा हूं...",
-        voice=voice,
-        language=lang_code
-    )
-    
     response.append(gather)
     
-    # If no input, try again
-    response.redirect(f"./no-input?lang={language}")
+    # If no input, try again (max 2 attempts before fallback)
+    response.redirect(f"./no-input?lang={language}&attempt=1")
     
     return twiml_response(response)
 
@@ -112,6 +105,7 @@ async def process_speech(
     """
     query_params = dict(request.query_params)
     language = query_params.get("lang", "en")
+    attempt = int(query_params.get("attempt", 0))
     
     # Get user input (speech or DTMF)
     user_input = SpeechResult or ""
@@ -125,11 +119,27 @@ async def process_speech(
         }
         user_input = dtmf_map.get(Digits, Digits)
     
+    # Check for max turn limit - guide to recording instead of hanging up
+    agent = get_voice_agent_service()
+    state = agent.get_or_create_state(CallSid)
+    if state.turn_count >= 15:
+        logger.info(f"Max turns reached for {CallSid}, guiding to cough recording")
+        voice, lang_code = _get_voice_config(language)
+        response = VoiceResponse()
+        response.say(
+            "Let me help you right away. I'll listen to your cough now." if language == "en"
+            else "मैं अभी आपकी मदद करता हूं। मैं आपकी खांसी सुनता हूं।",
+            voice=voice,
+            language=lang_code
+        )
+        # Skip to recording instead of hanging up
+        state.current_step = ConversationStep.RECORDING
+        response.redirect(f"./continue?lang={language}&step=recording")
+        return twiml_response(response)
+    
     logger.info(f"Voice agent speech: SID={CallSid}, Input='{user_input}', Confidence={Confidence}")
     
-    # Process input with voice agent
-    agent = get_voice_agent_service()
-    
+    # Process input with voice agent (already initialized above)
     try:
         agent_response = await agent.process_user_input(
             call_sid=CallSid,
@@ -153,8 +163,8 @@ async def process_speech(
     voice, lang_code = _get_voice_config(language)
     response = VoiceResponse()
     
-    # Special handling for recording step
-    if agent_response.should_record:
+    # Special handling for recording step - also handle RECORDING_INTRO as backup
+    if agent_response.should_record or agent_response.next_step == ConversationStep.RECORDING_INTRO:
         return await _handle_recording_request(response, CallSid, language, voice, lang_code)
     
     # Special handling for goodbye
@@ -166,36 +176,46 @@ async def process_speech(
         _call_states.pop(CallSid, None)
         return twiml_response(response)
     
-    # Special handling for ASHA handoff
+    # Special handling for ASHA handoff - ask for confirmation first
     if agent_response.next_step == ConversationStep.ASHA_HANDOFF:
-        response.say(agent_response.message, voice=voice, language=lang_code)
-        # Redirect to ASHA menu or Human Handoff flow
-        response.redirect(f"{settings.base_url}/india/voice/asha/menu")
+        response.say(
+            "Would you like me to connect you to a health worker? Press 1 or say yes to connect." 
+            if language == "en" else 
+            "क्या आप स्वास्थ्य कार्यकर्ता से बात करना चाहते हैं? जोड़ने के लिए 1 दबाएं या हां कहें।",
+            voice=voice, 
+            language=lang_code
+        )
+        gather = Gather(
+            input="speech dtmf",
+            action=f"./confirm-handoff?lang={language}",
+            timeout=8,
+            num_digits=1,
+            speech_timeout="auto",
+            language=lang_code,
+            hints="yes, no, haan, nahi, 1, 2",
+        )
+        response.append(gather)
+        # If no response, continue with cough recording instead
+        response.redirect(f"./continue?lang={language}&step=recording")
         return twiml_response(response)
     
     # Normal response - continue conversation
     response.say(agent_response.message, voice=voice, language=lang_code)
     
-    # Gather next input
+    # Gather next input (reset attempt counter on successful speech)
     gather = Gather(
         input="speech dtmf",
-        action=f"./process-speech?lang={language}",
-        timeout=settings.voice_agent_timeout if hasattr(settings, 'voice_agent_timeout') else 10,
+        action=f"./process-speech?lang={language}&attempt=0",
+        timeout=settings.voice_agent_timeout if hasattr(settings, 'voice_agent_timeout') else 8,
         speech_timeout="auto",
         language=lang_code,
         hints="farmer, kisan, cough, khasi, yes, no, haan, nahi, pesticide, dust",
     )
     
-    gather.say(
-        "..." if language == "en" else "...",  # Brief pause indicator
-        voice=voice,
-        language=lang_code
-    )
-    
     response.append(gather)
     
-    # Fallback if no input
-    response.redirect(f"./no-input?lang={language}")
+    # Fallback if no input - increment attempt
+    response.redirect(f"./no-input?lang={language}&attempt=1")
     
     return twiml_response(response)
 
@@ -270,10 +290,19 @@ async def recording_complete(
         response.redirect(f"./continue?lang={language}&step=recording")
         return twiml_response(response)
     
+    # Thank you message immediately after recording
+    response.say(
+        "Thank you!" if language == "en" else "धन्यवाद!",
+        voice=voice,
+        language=lang_code
+    )
+    
+    response.pause(length=1)
+    
     # Processing message
     response.say(
-        "Thank you. Let me analyze your cough. Just a moment..." if language == "en"
-        else "धन्यवाद। मैं आपकी खांसी की जांच करता हूं। एक पल रुकें...",
+        "Let me analyze your cough. Just a moment..." if language == "en"
+        else "मैं आपकी खांसी की जांच करता हूं। एक पल रुकें...",
         voice=voice,
         language=lang_code
     )
@@ -418,10 +447,52 @@ async def family_decision(
         response.pause(length=2)
         
         # Go to recording for next person
-        response.redirect(f"{settings.base_url}/voice-agent/continue?lang={language}&step=recording")
+        response.redirect(f"./continue?lang={language}&step=recording")
     else:
         # End call
-        response.redirect(f"{settings.base_url}/voice-agent/goodbye?lang={language}")
+        response.redirect(f"./goodbye?lang={language}")
+    
+    return twiml_response(response)
+
+
+@router.post("/confirm-handoff")
+async def confirm_handoff(
+    request: Request,
+    CallSid: str = Form(...),
+    SpeechResult: Optional[str] = Form(None),
+    Digits: Optional[str] = Form(None),
+):
+    """Handle confirmation for doctor/ASHA handoff"""
+    query_params = dict(request.query_params)
+    language = query_params.get("lang", "en")
+    
+    user_input = (SpeechResult or "").lower()
+    voice, lang_code = _get_voice_config(language)
+    
+    response = VoiceResponse()
+    
+    # Check for yes response
+    yes_indicators = ["yes", "1", "haan", "हां", "one", "ek", "doctor", "connect"]
+    if Digits == "1" or any(ind in user_input for ind in yes_indicators):
+        response.say(
+            "Connecting you to a health worker now. Please hold."
+            if language == "en" else
+            "आपको अभी स्वास्थ्य कार्यकर्ता से जोड़ रहा हूं। कृपया रुकें।",
+            voice=voice,
+            language=lang_code
+        )
+        # Redirect to ASHA menu
+        response.redirect(f"{settings.base_url}/india/voice/asha/menu")
+    else:
+        # User said no - continue with cough check
+        response.say(
+            "No problem! Let's continue with your health check."
+            if language == "en" else
+            "कोई बात नहीं! आइए आपकी सेहत जांच जारी रखें।",
+            voice=voice,
+            language=lang_code
+        )
+        response.redirect(f"./continue?lang={language}&step=recording")
     
     return twiml_response(response)
 
@@ -445,7 +516,7 @@ async def continue_conversation(
     # Default: continue with conversation
     gather = Gather(
         input="speech dtmf",
-        action=f"{settings.base_url}/voice-agent/process-speech?lang={language}",
+        action=f"./process-speech?lang={language}",
         timeout=10,
         speech_timeout="auto",
         language=lang_code,
@@ -458,7 +529,7 @@ async def continue_conversation(
     )
     
     response.append(gather)
-    response.redirect(f"{settings.base_url}/voice-agent/no-input?lang={language}")
+    response.redirect(f"./no-input?lang={language}")
     
     return twiml_response(response)
 
@@ -468,45 +539,50 @@ async def handle_no_input(
     request: Request,
     CallSid: str = Form(...),
 ):
-    """Handle case when user doesn't provide input"""
+    """Handle case when user doesn't provide input - progressive fallback"""
     query_params = dict(request.query_params)
     language = query_params.get("lang", "en")
-    attempt = int(query_params.get("attempt", 0))
+    attempt = int(query_params.get("attempt", 1))
     
     voice, lang_code = _get_voice_config(language)
     response = VoiceResponse()
     
-    if attempt >= 2:
-        # Too many retries, fallback to DTMF or end
+    logger.info(f"No-input handler: SID={CallSid}, attempt={attempt}")
+    
+    if attempt >= 3:
+        # After 3 attempts, guide to cough recording instead of hanging up
         response.say(
-            "I'm having trouble hearing you. Let me transfer you to our other system."
+            "No problem! Let me just listen to your cough. Please cough after the beep."
             if language == "en" else
-            "मुझे आपकी आवाज सुनने में दिक्कत हो रही है। मैं आपको दूसरी प्रणाली से जोड़ता हूं।",
+            "कोई बात नहीं! मैं बस आपकी खांसी सुनता हूं। बीप के बाद खांसें।",
             voice=voice,
             language=lang_code
         )
-        # Fallback to regular DTMF flow
-        response.redirect(f"{settings.base_url}/india/voice/incoming?lang={language}")
+        # Guide to recording instead of hanging up
+        response.redirect(f"./continue?lang={language}&step=recording")
         return twiml_response(response)
     
-    # Try again
+    # Prompt message varies by attempt to avoid repetition
+    if attempt == 1:
+        prompt = "I didn't catch that. Could you say that again?" if language == "en" else "मैंने सुना नहीं। क्या आप फिर से बोल सकते हैं?"
+    else:
+        prompt = "Please speak clearly or press 1 for yes, 2 for no." if language == "en" else "कृपया स्पष्ट बोलें या हां के लिए 1, ना के लिए 2 दबाएं।"
+    
+    # Say prompt first, then gather
+    response.say(prompt, voice=voice, language=lang_code)
+    
+    # Gather with shorter timeout on retries
     gather = Gather(
         input="speech dtmf",
-        action=f"{settings.base_url}/voice-agent/process-speech?lang={language}",
-        timeout=10,
+        action=f"./process-speech?lang={language}&attempt={attempt}",
+        timeout=6,  # Shorter timeout on retries
         speech_timeout="auto",
         language=lang_code,
-    )
-    
-    gather.say(
-        "I didn't catch that. Could you please repeat?" if language == "en"
-        else "मैंने सुना नहीं। क्या आप दोहरा सकते हैं?",
-        voice=voice,
-        language=lang_code
+        hints="yes, no, haan, nahi, 1, 2",
     )
     
     response.append(gather)
-    response.redirect(f"{settings.base_url}/voice-agent/no-input?lang={language}&attempt={attempt + 1}")
+    response.redirect(f"./no-input?lang={language}&attempt={attempt + 1}")
     
     return twiml_response(response)
 
