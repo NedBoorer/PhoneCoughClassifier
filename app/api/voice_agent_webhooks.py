@@ -76,7 +76,7 @@ async def voice_agent_start(
     # Gather speech input
     gather = Gather(
         input="speech dtmf",  # Accept both speech and keypad
-        action=f"{settings.base_url}/voice-agent/process-speech?lang={language}",
+        action=f"./process-speech?lang={language}",
         timeout=settings.voice_agent_timeout if hasattr(settings, 'voice_agent_timeout') else 10,
         speech_timeout="auto",
         language=lang_code,
@@ -93,7 +93,7 @@ async def voice_agent_start(
     response.append(gather)
     
     # If no input, try again
-    response.redirect(f"{settings.base_url}/voice-agent/no-input?lang={language}")
+    response.redirect(f"./no-input?lang={language}")
     
     return twiml_response(response)
 
@@ -147,7 +147,7 @@ async def process_speech(
             voice=voice,
             language=lang_code
         )
-        response.redirect(f"{settings.base_url}/voice-agent/continue?lang={language}")
+        response.redirect(f"./continue?lang={language}")
         return twiml_response(response)
     
     voice, lang_code = _get_voice_config(language)
@@ -179,7 +179,7 @@ async def process_speech(
     # Gather next input
     gather = Gather(
         input="speech dtmf",
-        action=f"{settings.base_url}/voice-agent/process-speech?lang={language}",
+        action=f"./process-speech?lang={language}",
         timeout=settings.voice_agent_timeout if hasattr(settings, 'voice_agent_timeout') else 10,
         speech_timeout="auto",
         language=lang_code,
@@ -195,7 +195,7 @@ async def process_speech(
     response.append(gather)
     
     # Fallback if no input
-    response.redirect(f"{settings.base_url}/voice-agent/no-input?lang={language}")
+    response.redirect(f"./no-input?lang={language}")
     
     return twiml_response(response)
 
@@ -228,12 +228,12 @@ async def _handle_recording_request(
     response.pause(length=1)
     
     # Record cough
+    # Note: trim="trim-silence" removed to prevent dropping quiet recordings
     response.record(
         max_length=settings.max_recording_duration,
         timeout=3,
         play_beep=True,
-        trim="trim-silence",
-        action=f"{settings.base_url}/voice-agent/recording-complete?lang={language}",
+        action=f"./recording-complete?lang={language}",
         recording_status_callback=f"{settings.base_url}/twilio/voice/recording-status",
     )
     
@@ -267,7 +267,7 @@ async def recording_complete(
             voice=voice,
             language=lang_code
         )
-        response.redirect(f"{settings.base_url}/voice-agent/continue?lang={language}&step=recording")
+        response.redirect(f"./continue?lang={language}&step=recording")
         return twiml_response(response)
     
     # Processing message
@@ -282,6 +282,8 @@ async def recording_complete(
     try:
         twilio_service = get_twilio_service()
         local_path = settings.recordings_dir / f"{CallSid}_agent.wav"
+        
+        # Download might fail if URL is not public/reachable, handle gracefully
         await twilio_service.download_recording(RecordingUrl, str(local_path))
         
         hub = get_model_hub()
@@ -325,7 +327,7 @@ async def recording_complete(
         
         gather = Gather(
             input="speech dtmf",
-            action=f"{settings.base_url}/voice-agent/family-decision?lang={language}",
+            action=f"./family-decision?lang={language}",
             timeout=8,
             num_digits=1,
             speech_timeout="auto",
@@ -343,7 +345,7 @@ async def recording_complete(
         response.append(gather)
         
         # Default to goodbye if no response
-        response.redirect(f"{settings.base_url}/voice-agent/goodbye?lang={language}")
+        response.redirect(f"./goodbye?lang={language}")
         
     except Exception as e:
         logger.error(f"Analysis failed: {e}")
@@ -354,7 +356,7 @@ async def recording_complete(
             voice=voice,
             language=lang_code
         )
-        response.redirect(f"{settings.base_url}/voice-agent/goodbye?lang={language}")
+        response.redirect(f"./goodbye?lang={language}")
     
     return twiml_response(response)
 
