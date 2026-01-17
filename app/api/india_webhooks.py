@@ -608,11 +608,12 @@ async def recording_complete_india(
                 str(local_path),
                 enable_respiratory=True,
                 enable_parkinsons=settings.enable_parkinsons_screening,
-                enable_depression=settings.enable_depression_screening
+                enable_depression=settings.enable_depression_screening,
+                enable_tuberculosis=settings.enable_tuberculosis_screening
             )
             
             # 3. Decision Logic & Golden Ticket
-            risk_high = result.overall_risk_level in ["moderate", "high", "severe", "urgent"]
+            risk_high = result.overall_risk_level in ["moderate", "high", "severe", "urgent", "moderate_risk", "high_risk"]
             referral_code = None
             
             import random
@@ -725,6 +726,15 @@ async def recording_complete_india(
                             f"कृपया 24 घंटे के भीतर अपने निकटतम स्वास्थ्य केंद्र जाएं और यह टिकट डॉक्टर को दिखाएं। "
                             f"यह टिकट 7 दिनों के लिए मान्य है।"
                         )
+                    
+                    # Special TB handling - Mention DOTS
+                    if result.primary_concern == "tuberculosis":
+                         dots_msg = (
+                            "Please ask for the DOTS center for free TB testing." if language == 'en' else
+                            "कृपया मुफ्त टीबी जांच के लिए डॉट सेंटर के बारे में पूछें।"
+                         )
+                         ticket_msg += " " + dots_msg
+                        
                     response.say(ticket_msg, voice=voice, language=lang_code)
 
                 # Tele-Triage Bridge

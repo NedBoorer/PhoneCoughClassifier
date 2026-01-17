@@ -93,10 +93,12 @@ class VoiceAgentService:
         """Lazy load OpenAI client"""
         if self._client is None:
             if not settings.openai_api_key:
+                # If no key, return a dummy client or raise clearer error
+                # For now assume mostly mocked or provided
                 raise ValueError("OPENAI_API_KEY not configured")
             self._client = OpenAI(api_key=settings.openai_api_key)
         return self._client
-    
+
     def get_or_create_state(self, call_sid: str) -> ConversationState:
         """Get existing conversation state or create new one"""
         if call_sid not in self._conversations:
@@ -139,6 +141,10 @@ CRITICAL RULES:
 - Warm but BRIEF (use "Ji" if Hindi)
 - Never say AI/Robot - say "health service"
 - Emergency → call 108
+- If TB is mentioned, emphasize it's curable with free treatment (DOTS)
+
+CONTEXT:
+- If TB is mentioned, emphasize it's curable with free treatment (DOTS)
 
 CONTEXT:
 {context[:300]}
@@ -229,17 +235,27 @@ Reply with ONLY your short spoken response, no explanation."""
     ) -> AgentResponse:
         """
         Process user speech input and generate response.
-        
+
         Args:
             call_sid: Twilio call SID
             user_input: Transcribed user speech
             language: Override language if detected
-            
+
         Returns:
             AgentResponse with message and next step
         """
+        # Validate inputs
+        if not call_sid or not isinstance(call_sid, str):
+            logger.error(f"Invalid call_sid: {call_sid}")
+            raise ValueError("Invalid call_sid")
+
+        # Handle empty or whitespace-only input
+        if not user_input or not user_input.strip():
+            logger.warning(f"Empty user input for {call_sid}, treating as silence")
+            user_input = "[silence]"
+
         state = self.get_or_create_state(call_sid)
-        
+
         # Update language if provided
         if language:
             state.language = language
@@ -273,25 +289,35 @@ Reply with ONLY your short spoken response, no explanation."""
                 message = self._response_cache[cache_key]
                 logger.debug(f"Cache hit for: {cache_key[:30]}")
             else:
+                # Build messages with error handling
+                messages = [{"role": "system", "content": system_prompt}]
+                # Only include valid message history
+                for msg in state.message_history[-4:]:
+                    if isinstance(msg, dict) and "role" in msg and "content" in msg:
+                        messages.append(msg)
+
                 response = self.client.chat.completions.create(
                     model=settings.voice_agent_model if hasattr(settings, 'voice_agent_model') else "gpt-4o-mini",
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        *state.message_history[-4:],  # Reduced from 6 to 4 for lower cost
-                    ],
+                    messages=messages,
                     max_tokens=60,  # Very short for phone call responses
                     temperature=0.6,  # Lower temp for more consistent, focused responses
+                    timeout=10.0,  # Add timeout for LLM calls
                 )
-                
+
                 message = response.choices[0].message.content.strip()
-                
+
+                # Validate message isn't empty
+                if not message:
+                    logger.warning(f"Empty LLM response for {call_sid}, using fallback")
+                    message = self._get_fallback_message(state)
+
                 # Cache response with size limit
                 if len(self._response_cache) >= self._cache_max_size:
                     self._response_cache.pop(next(iter(self._response_cache)))
                 self._response_cache[cache_key] = message
-            
+
         except Exception as e:
-            logger.error(f"LLM call failed: {e}")
+            logger.error(f"LLM call failed for {call_sid}: {type(e).__name__}: {e}")
             # Fallback message
             message = self._get_fallback_message(state)
         
@@ -371,6 +397,14 @@ Reply with ONLY your short spoken response, no explanation."""
         """Generate personalized results message"""
         collected = state.collected_info
         
+        # Normalize risk strings
+        if risk_level == "high_risk":
+            risk_level = "high"
+        elif risk_level == "moderate_risk":
+            risk_level = "moderate"
+        elif risk_level == "low_risk":
+            risk_level = "low"
+            
         # Escalate risk if pesticide exposure
         if collected.get("pesticide_exposure") and risk_level in ["low", "normal"]:
             risk_level = "moderate"
@@ -379,7 +413,7 @@ Reply with ONLY your short spoken response, no explanation."""
             if risk_level in ["high", "severe", "urgent"]:
                 return (
                     f"बेटा, मुझे आपकी सेहत की चिंता है। {recommendation} "
-                    "कृपया आज ही डॉक्टर से मिलें। मैं आपको रिपोर्ट भेज रहा हूं।"
+                    "कृपया आज ही डॉक्टर या DOTS केंद्र से मिलें। मैं आपको रिपोर्ट भेज रहा हूं।"
                 )
             elif risk_level in ["moderate"]:
                 return (
@@ -395,7 +429,7 @@ Reply with ONLY your short spoken response, no explanation."""
             if risk_level in ["high", "severe", "urgent"]:
                 return (
                     f"I'm concerned about what I'm hearing. {recommendation} "
-                    "Please see a doctor today. I'm sending you a detailed report."
+                    "Please visit a doctor or DOTS center today. I'm sending you a detailed report."
                 )
             elif risk_level in ["moderate"]:
                 return (

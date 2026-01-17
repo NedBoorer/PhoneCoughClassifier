@@ -543,6 +543,7 @@ class ModelHub:
         self._respiratory = None
         self._parkinsons = None
         self._depression = None
+        self._tuberculosis = None
     
     @property
     def respiratory_classifier(self) -> RespiratoryClassifier:
@@ -562,12 +563,21 @@ class ModelHub:
             self._depression = DepressionScreener()
         return self._depression
     
+    @property
+    def tuberculosis_screener(self):
+        """Lazy load TB screener"""
+        if self._tuberculosis is None:
+            from app.ml.tb_classifier import TuberculosisScreener
+            self._tuberculosis = TuberculosisScreener()
+        return self._tuberculosis
+    
     def run_full_analysis(
         self, 
         audio_path: str,
         enable_respiratory: bool = True,
         enable_parkinsons: bool = False,
-        enable_depression: bool = False
+        enable_depression: bool = False,
+        enable_tuberculosis: bool = True
     ) -> ComprehensiveHealthResult:
         """
         Run comprehensive voice health analysis.
@@ -577,6 +587,7 @@ class ModelHub:
             enable_respiratory: Enable COPD/Asthma screening
             enable_parkinsons: Enable Parkinson's screening (opt-in)
             enable_depression: Enable depression screening (opt-in)
+            enable_tuberculosis: Enable TB screening (enabled by default)
         """
         import time
         start_time = time.time()
@@ -614,12 +625,43 @@ class ModelHub:
             except Exception as e:
                 logger.error(f"Depression screening failed: {e}")
         
+        # Tuberculosis screening (enabled by default for cough analysis)
+        if enable_tuberculosis:
+            try:
+                tb_result = self.tuberculosis_screener.screen(audio_path)
+                # Convert TBScreeningResult to ScreeningResult for consistency
+                screenings["tuberculosis"] = ScreeningResult(
+                    disease="tuberculosis",
+                    detected=tb_result.detected,
+                    confidence=tb_result.confidence,
+                    severity=tb_result.severity,
+                    details=tb_result.details,
+                    recommendation=tb_result.recommendation
+                )
+                # Add TB-specific biomarkers
+                if tb_result.details.get("features"):
+                    voice_biomarkers["wetness_score"] = tb_result.details["features"].get("wetness_score", 0)
+                    voice_biomarkers["spectral_centroid"] = tb_result.details["features"].get("spectral_centroid_mean", 0)
+            except Exception as e:
+                logger.error(f"TB screening failed: {e}")
+        
         # Determine primary concern and overall risk
+        # TB takes priority as it's infectious
         primary_concern = "none"
         overall_risk = "low"
         recommendations = []
         
-        severity_rank = {"normal": 0, "mild": 1, "moderate": 2, "severe": 3, "high": 3, "urgent": 4}
+        severity_rank = {
+            "normal": 0, 
+            "mild": 1, 
+            "low_risk": 1,
+            "moderate": 2, 
+            "moderate_risk": 2,
+            "severe": 3, 
+            "high": 3, 
+            "high_risk": 3,
+            "urgent": 4
+        }
         
         for name, result in screenings.items():
             if result.detected:
@@ -643,10 +685,30 @@ class ModelHub:
         )
 
     async def run_full_analysis_async(self, *args, **kwargs) -> ComprehensiveHealthResult:
-        """Async wrapper for run_full_analysis"""
+        """Async wrapper for run_full_analysis with timeout protection"""
         import asyncio
+        from app.config import settings
+
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, lambda: self.run_full_analysis(*args, **kwargs))
+        timeout = getattr(settings, 'analysis_timeout_seconds', 15)
+
+        try:
+            # Run analysis with timeout
+            return await asyncio.wait_for(
+                loop.run_in_executor(None, lambda: self.run_full_analysis(*args, **kwargs)),
+                timeout=timeout
+            )
+        except asyncio.TimeoutError:
+            logger.error(f"Analysis timed out after {timeout} seconds")
+            # Return a minimal result on timeout
+            return ComprehensiveHealthResult(
+                primary_concern="timeout",
+                overall_risk_level="unknown",
+                screenings={},
+                voice_biomarkers={},
+                processing_time_ms=timeout * 1000,
+                recommendation="Analysis took too long. Please try again with a shorter recording."
+            )
 
 
 # Singleton instance

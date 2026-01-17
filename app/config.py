@@ -28,8 +28,9 @@ class Settings(BaseSettings):
     database_url: str = "sqlite+aiosqlite:///./data/cough_classifier.db"
     
     # Audio
-    max_recording_duration: int = 10
+    max_recording_duration: int = 6  # Reduced from 10 to 6 seconds for faster experience
     audio_sample_rate: int = 16000
+    analysis_timeout_seconds: int = 15  # Maximum time for analysis before timeout
     
     # ML Model
     model_path: str = "./models/cough_classifier.joblib"
@@ -47,7 +48,12 @@ class Settings(BaseSettings):
     enable_respiratory_screening: bool = True
     enable_parkinsons_screening: bool = True  # Enabled for demo
     enable_depression_screening: bool = True  # Enabled for demo
+    enable_tuberculosis_screening: bool = True  # TB screening enabled by default
     screening_model_device: str = "cpu"  # "cpu" or "cuda"
+    
+    # Tuberculosis Screening
+    tb_model_path: str = "./models/tb_classifier.joblib"
+    tb_screening_threshold: float = 0.45  # Lower threshold for screening sensitivity
 
     # Rural India Accessibility
     doctor_helpline_number: str = "+910000000000"  # Placeholder eSanjeevani or similar
@@ -77,8 +83,11 @@ class Settings(BaseSettings):
     # Voice Agent Configuration
     enable_voice_agent: bool = True
     voice_agent_model: str = "gpt-4o-mini"
-    voice_agent_max_turns: int = 10
+    voice_agent_max_turns: int = 15  # Maximum conversation turns before forcing recording
     voice_agent_timeout: int = 10  # seconds to wait for speech input
+    max_no_input_attempts: int = 5  # Maximum no-input attempts before ending call
+    max_recording_attempts: int = 3  # Maximum recording retry attempts
+    max_family_screenings: int = 5  # Maximum family members to screen per call
     
     # Trust & Reliability
     trusted_authority_name: str = "District Health Mission"
