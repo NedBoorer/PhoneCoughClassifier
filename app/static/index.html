@@ -97,16 +97,16 @@
             </p>
             
             <!-- Avatar Visualizer -->
-            <div class="relative w-48 h-48 mx-auto mb-8 flex items-center justify-center cursor-pointer group" id="avatar-container">
-                <!-- Ripples -->
-                <div class="absolute border border-primary/30 rounded-full w-full h-full animate-[ping_3s_linear_infinite] opacity-50"></div>
-                <div class="absolute border border-primary/20 rounded-full w-full h-full animate-[ping_3s_linear_infinite_1s] opacity-50"></div>
+            <div class="relative w-40 h-40 mx-auto mb-10 flex items-center justify-center cursor-pointer group" id="avatar-container">
+                <!-- Ripples (Pointer Events None to avoid blocking clicks) -->
+                <div class="absolute border border-primary/30 rounded-full w-full h-full animate-[ping_3s_linear_infinite] opacity-50 pointer-events-none"></div>
+                <div class="absolute border border-primary/20 rounded-full w-full h-full animate-[ping_3s_linear_infinite_1s] opacity-50 pointer-events-none"></div>
                 
                 <!-- Core Avatar -->
                 <div class="w-32 h-32 bg-gradient-to-tr from-primary to-emerald-400 rounded-full shadow-2xl flex items-center justify-center transform transition-transform group-hover:scale-105 relative overflow-hidden">
                     <div class="absolute inset-0 bg-white/20 blur-sm"></div>
                     <!-- Icon -->
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-16 w-16 text-white relative z-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <svg id="mic-icon" xmlns="http://www.w3.org/2000/svg" class="h-16 w-16 text-white relative z-10 transition-opacity duration-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
                     </svg>
                     
