@@ -1331,6 +1331,56 @@ async def _present_results(response, CallSid, From, result, language, voice, lan
     return twiml_response(response)
 
 
+@router.post("/filler-response")
+async def filler_response(
+    request: Request,
+    CallSid: str = Form(...),
+    SpeechResult: Optional[str] = Form(None),
+    Digits: Optional[str] = Form(None),
+):
+    """
+    Handle user's response to filler questions asked during analysis.
+    Acknowledge their answer and continue checking for results.
+    """
+    query_params = dict(request.query_params)
+    language = query_params.get("lang", "en")
+    attempt = int(query_params.get("attempt", 1))
+    question_key = query_params.get("key", "unknown")
+    
+    voice, lang_code = _get_voice_config(language)
+    response = VoiceResponse()
+    
+    # Parse user response
+    user_input = (SpeechResult or "").lower()
+    is_yes = Digits == "1" or any(w in user_input for w in ["yes", "haan", "हां", "yeah"])
+    is_no = Digits == "2" or any(w in user_input for w in ["no", "nahi", "नहीं", "nope"])
+    
+    # Store the answer in call state for later use
+    lock = _get_state_lock()
+    with lock:
+        if CallSid in _call_states:
+            if "symptom_responses" not in _call_states[CallSid]:
+                _call_states[CallSid]["symptom_responses"] = {}
+            _call_states[CallSid]["symptom_responses"][question_key] = "yes" if is_yes else ("no" if is_no else user_input)
+    
+    logger.info(f"Filler response for {CallSid}: key={question_key}, yes={is_yes}, no={is_no}")
+    
+    # Brief acknowledgment (conversational, not robotic)
+    if is_yes:
+        ack = "I understand, thank you for telling me." if language == "en" else "समझ गया, बताने के लिए धन्यवाद।"
+    elif is_no:
+        ack = "Good to know, thank you." if language == "en" else "अच्छा है, धन्यवाद।"
+    else:
+        ack = "Got it." if language == "en" else "समझ गया।"
+    
+    response.say(ack, voice=voice, language=lang_code)
+    
+    # Continue checking results (increment attempt)
+    response.redirect(f"/voice-agent/check-results?lang={language}&attempt={attempt + 1}")
+    
+    return twiml_response(response)
+
+
 @router.post("/goodbye")
 async def goodbye(
     request: Request,
