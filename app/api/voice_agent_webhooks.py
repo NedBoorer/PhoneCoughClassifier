@@ -586,10 +586,15 @@ async def combine_and_analyze(
     return twiml_response(response)
 
 
-async def _combine_and_analyze_chunks(CallSid: str, chunk_urls: list, language: str):
+def _combine_and_analyze_chunks(CallSid: str, chunk_urls: list, language: str):
     """
     Background task: Download chunks, combine into one file, and run analysis.
+    
+    Note: This is a synchronous function because FastAPI background tasks
+    run in a ThreadPoolExecutor, not in the async event loop.
     """
+    import asyncio
+    
     lock = _get_state_lock()
 
     try:
@@ -600,7 +605,8 @@ async def _combine_and_analyze_chunks(CallSid: str, chunk_urls: list, language: 
         chunk_files = []
         for i, url in enumerate(chunk_urls):
             chunk_path = settings.recordings_dir / f"{CallSid}_chunk{i}.wav"
-            await twilio_service.download_recording(url, str(chunk_path))
+            # Run async download synchronously
+            asyncio.run(twilio_service.download_recording(url, str(chunk_path)))
             chunk_files.append(chunk_path)
             logger.debug(f"Downloaded chunk {i}: {chunk_path}")
 
@@ -623,10 +629,10 @@ async def _combine_and_analyze_chunks(CallSid: str, chunk_urls: list, language: 
             logger.warning("pydub not available, using first chunk only")
             final_path = chunk_files[0]
 
-        # Run analysis on combined file
+        # Run analysis on combined file (use synchronous version)
         logger.info(f"Running ML analysis for {CallSid}")
         hub = get_model_hub()
-        result = await hub.run_full_analysis_async(
+        result = hub.run_full_analysis(
             str(final_path),
             enable_respiratory=settings.enable_respiratory_screening,
             enable_parkinsons=settings.enable_parkinsons_screening,
@@ -760,13 +766,18 @@ async def recording_complete(
     return twiml_response(response)
 
 
-async def _run_background_analysis(CallSid: str, RecordingUrl: str, language: str):
+def _run_background_analysis(CallSid: str, RecordingUrl: str, language: str):
     """
     Run ML analysis in background while user hears health tips.
 
     This decouples analysis from TwiML response, enabling better UX.
     Results are stored in _analysis_results for retrieval.
+    
+    Note: This is a synchronous function because FastAPI background tasks
+    run in a ThreadPoolExecutor, not in the async event loop.
     """
+    import asyncio
+    
     lock = _get_state_lock()
 
     try:
@@ -774,14 +785,14 @@ async def _run_background_analysis(CallSid: str, RecordingUrl: str, language: st
         twilio_service = get_twilio_service()
         local_path = settings.recordings_dir / f"{CallSid}_agent.wav"
 
-        # Download recording
+        # Download recording (run async function synchronously)
         logger.debug(f"Downloading recording to {local_path}")
-        await twilio_service.download_recording(RecordingUrl, str(local_path))
+        asyncio.run(twilio_service.download_recording(RecordingUrl, str(local_path)))
 
-        # Run analysis
+        # Run analysis (use synchronous version - background tasks don't support async/await)
         logger.info(f"Running ML analysis for {CallSid}")
         hub = get_model_hub()
-        result = await hub.run_full_analysis_async(
+        result = hub.run_full_analysis(
             str(local_path),
             enable_respiratory=settings.enable_respiratory_screening,
             enable_parkinsons=settings.enable_parkinsons_screening,
