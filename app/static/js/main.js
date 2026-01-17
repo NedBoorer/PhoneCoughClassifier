@@ -26,52 +26,110 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // --- Admin Panel Logic ---
-    renderAdminPanel();
+    loadReferrals();
+
+    // --- Demo Analysis Logic ---
+    const analyzeBtn = document.getElementById('analyze-btn');
+    const audioUpload = document.getElementById('audio-upload');
+    const analysisResult = document.getElementById('analysis-result');
+
+    if (analyzeBtn && audioUpload) {
+        analyzeBtn.addEventListener('click', async () => {
+            const file = audioUpload.files[0];
+            if (!file) {
+                alert('Please select an audio file first.');
+                return;
+            }
+
+            analysisResult.style.display = 'block';
+            analysisResult.textContent = 'Analyzing audio with AI...';
+            
+            const formData = new FormData();
+            formData.append('audio_file', file);
+
+            try {
+                const response = await fetch('/test/classify', {
+                    method: 'POST',
+                    body: formData
+                });
+                const result = await response.json();
+
+                analysisResult.innerHTML = `
+                    <div style="font-weight: bold; margin-bottom: 0.5rem;">Analysis Complete:</div>
+                    <div>Classification: <span style="color: var(--primary-color);">${result.classification}</span></div>
+                    <div>Severity: <span style="color: ${result.severity === 'urgent' ? 'red' : 'orange'};">${result.severity}</span></div>
+                    <div>Confidence: ${(result.confidence * 100).toFixed(1)}%</div>
+                    <div style="margin-top: 0.5rem; font-size: 0.9rem; font-style: italic;">"${result.recommendation}"</div>
+                `;
+            } catch (error) {
+                console.error('Analysis failed:', error);
+                analysisResult.textContent = 'Error: Could not analyze audio.';
+            }
+        });
+    }
 });
 
-function renderAdminPanel() {
+async function loadReferrals() {
     const tableBody = document.querySelector('#referral-table tbody');
     if (!tableBody) return;
 
-    // Spoof Data for Patient Referrals
-    const referralData = [
-        { phone: '+1 (555) 123-4567', doctor: 'Dr. Sarah Smith', date: '2026-01-18', status: 'success' },
-        { phone: '+1 (555) 987-6543', doctor: 'Dr. Raj Patel', date: '2026-01-18', status: 'pending' },
-        { phone: '+1 (555) 456-7890', doctor: 'Dr. Emily Chen', date: '2026-01-17', status: 'failure' },
-        { phone: '+1 (555) 222-3333', doctor: 'Dr. Alan Turing', date: '2026-01-16', status: 'success' },
-        { phone: '+1 (555) 888-9999', doctor: 'Dr. Grace Hopper', date: '2026-01-15', status: 'success' },
-    ];
-
-    referralData.forEach(item => {
-        const row = document.createElement('tr');
+    try {
+        const response = await fetch('/admin/referrals');
+        const data = await response.json();
         
-        let statusLabel = '';
-        let statusClass = '';
+        tableBody.innerHTML = ''; // Clear existing
 
-        switch(item.status) {
-            case 'success':
-                statusLabel = 'Checked In';
-                statusClass = 'status-success';
-                break;
-            case 'failure':
-                statusLabel = 'Missed';
-                statusClass = 'status-failure';
-                break;
-            case 'pending':
-                statusLabel = 'Pending';
-                statusClass = 'status-pending';
-                break;
-            default:
-                statusLabel = 'Unknown';
-                statusClass = 'status-pending';
+        if (data.length === 0) {
+            tableBody.innerHTML = '<tr><td colspan="6" style="text-align:center;">No referrals found in database.</td></tr>';
+            return;
         }
 
-        row.innerHTML = `
-            <td>${item.phone}</td>
-            <td>${item.doctor}</td>
-            <td>${item.date}</td>
-            <td><span class="status-badge ${statusClass}">${statusLabel}</span></td>
-        `;
-        tableBody.appendChild(row);
-    });
+        data.forEach(item => {
+            const row = document.createElement('tr');
+            
+            const statusLabel = item.verified ? 'Checked In' : 'Pending';
+            const statusClass = item.verified ? 'status-success' : 'status-pending';
+            
+            // Audio player
+            const audioHtml = item.recording_url 
+                ? `<audio controls src="${item.recording_url}" style="height: 30px; width: 150px;"></audio>` 
+                : '<span style="color: #94a3b8; font-size: 0.8rem;">No recording</span>';
+
+            // Verify button
+            const actionHtml = item.verified 
+                ? '<span style="color: #166534; font-size: 0.8rem;">✓ Verified</span>' 
+                : `<button onclick="verifyVisit(${item.id})" style="padding: 0.25rem 0.5rem; font-size: 0.8rem; background-color: #64748b;">Verify Visit</button>`;
+
+            row.innerHTML = `
+                <td>${item.phone}</td>
+                <td style="text-transform: capitalize;">${item.severity}</td>
+                <td>${item.date}</td>
+                <td><span class="status-badge ${statusClass}">${statusLabel}</span></td>
+                <td>${audioHtml}</td>
+                <td>${actionHtml}</td>
+            `;
+            tableBody.appendChild(row);
+        });
+    } catch (error) {
+        console.error('Error loading referrals:', error);
+        tableBody.innerHTML = '<tr><td colspan="6" style="text-align:center; color: red;">Error loading data from server.</td></tr>';
+    }
+}
+
+async function verifyVisit(callId) {
+    if (!confirm('Mark this patient as verified at the clinic?')) return;
+
+    try {
+        const response = await fetch(`/admin/verify/${callId}`, { method: 'POST' });
+        const result = await response.json();
+        
+        if (result.status === 'success') {
+            loadReferrals(); // Refresh table
+        } else {
+            alert('Error: ' + result.message);
+        }
+    } catch (error) {
+        console.error('Error verifying visit:', error);
+        alert('Failed to connect to server.');
+    }
 }

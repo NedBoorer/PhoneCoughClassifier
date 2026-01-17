@@ -23,6 +23,15 @@
         </div>
 
         <div class="card">
+            <h2>Demo: Analyze Audio</h2>
+            <p>Upload a cough recording (.wav or .mp3) to test the AI classifier immediately.</p>
+            <input type="file" id="audio-upload" accept="audio/*" style="margin-bottom: 1rem;">
+            <br>
+            <button id="analyze-btn">Analyze Cough</button>
+            <div id="analysis-result" style="margin-top: 1rem; padding: 1rem; border-radius: 4px; display: none; background-color: #f1f5f9;"></div>
+        </div>
+
+        <div class="card">
             <h2>Admin Panel: Referral Tracking</h2>
             <p>Monitor patient referrals and doctor check-ins.</p>
             <div class="admin-table-container">
@@ -30,9 +39,11 @@
                     <thead>
                         <tr>
                             <th>Patient Phone</th>
-                            <th>Referred Doctor</th>
-                            <th>Referral Date</th>
+                            <th>Severity</th>
+                            <th>Date</th>
                             <th>Status</th>
+                            <th>Audio</th>
+                            <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody>

@@ -205,3 +205,48 @@ async def outbound_checkup_response(
         response.say("Thank you. Goodbye.", voice="Polly.Aditi", language="en-IN")
         
     return Response(content=str(response), media_type="application/xml")
+
+
+@router.get("/referrals")
+async def get_referrals(db: AsyncSession = Depends(get_session)):
+    """Fetch recent referrals with their classification and recording info"""
+    stmt = (
+        select(CallRecord)
+        .join(CallRecord.classification)
+        .order_by(CallRecord.created_at.desc())
+        .limit(20)
+    )
+    result = await db.execute(stmt)
+    calls = result.scalars().all()
+    
+    referrals = []
+    for call in calls:
+        referrals.append({
+            "id": call.id,
+            "phone": call.caller_number,
+            "date": call.created_at.strftime("%Y-%m-%d %H:%M"),
+            "classification": call.classification.classification,
+            "severity": call.classification.severity,
+            "verified": call.classification.visit_verified,
+            "recording_url": call.recording_url
+        })
+    
+    return referrals
+
+
+@router.post("/verify/{call_id}")
+async def verify_referral(call_id: int, db: AsyncSession = Depends(get_session)):
+    """Mark a referral as verified (doctor check-in)"""
+    stmt = select(ClassificationResult).where(ClassificationResult.call_id == call_id)
+    result = await db.execute(stmt)
+    classification = result.scalar_one_or_none()
+    
+    if not classification:
+        return {"status": "error", "message": "Record not found"}
+        
+    classification.visit_verified = True
+    classification.visit_verified_at = datetime.utcnow()
+    await db.commit()
+    
+    return {"status": "success"}
+
