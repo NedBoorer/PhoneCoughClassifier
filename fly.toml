@@ -20,6 +20,7 @@ kill_timeout = "5s"
   ENVIRONMENT = "production"
   DEBUG = "false"
   PORT = "8000"
+  BASE_URL = "https://phone-cough-classifier.fly.dev"
 
   # Database (using SQLite for simplicity - Fly.io volumes persist data)
   DATABASE_URL = "sqlite+aiosqlite:///./data/cough_classifier.db"

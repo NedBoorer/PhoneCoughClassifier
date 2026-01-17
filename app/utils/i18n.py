@@ -17,17 +17,18 @@ class LanguageConfig:
 
 
 # Supported languages
+# Using Amazon Polly voices - valid Twilio voice names
 LANGUAGES = {
-    "en": LanguageConfig("en", "English", "English", "Google.en-IN-Neural", "en-IN"),
-    "hi": LanguageConfig("hi", "Hindi", "हिंदी", "Google.hi-IN-Neural", "hi-IN"),
-    "ta": LanguageConfig("ta", "Tamil", "தமிழ்", "Google.ta-IN-Neural", "ta-IN"),
-    "te": LanguageConfig("te", "Telugu", "తెలుగు", "Google.te-IN-Neural", "te-IN"),
-    "bn": LanguageConfig("bn", "Bengali", "বাংলা", "Google.bn-IN-Neural", "bn-IN"),
-    "mr": LanguageConfig("mr", "Marathi", "मराठी", "Google.mr-IN-Neural", "mr-IN"),
-    "gu": LanguageConfig("gu", "Gujarati", "ગુજરાતી", "Google.gu-IN-Neural", "gu-IN"),
-    "kn": LanguageConfig("kn", "Kannada", "ಕನ್ನಡ", "Google.kn-IN-Neural", "kn-IN"),
-    "ml": LanguageConfig("ml", "Malayalam", "മലയാളം", "Google.ml-IN-Neural", "ml-IN"),
-    "pa": LanguageConfig("pa", "Punjabi", "ਪੰਜਾਬੀ", "Google.pa-IN-Neural", "pa-IN"),
+    "en": LanguageConfig("en", "English", "English", "Polly.Aditi", "en-IN"),
+    "hi": LanguageConfig("hi", "Hindi", "हिंदी", "Polly.Aditi", "hi-IN"),
+    "ta": LanguageConfig("ta", "Tamil", "தமிழ்", "Polly.Aditi", "en-IN"),  # Polly.Aditi for Tamil with English backup
+    "te": LanguageConfig("te", "Telugu", "తెలుగు", "Polly.Aditi", "en-IN"),
+    "bn": LanguageConfig("bn", "Bengali", "বাংলা", "Polly.Aditi", "en-IN"),
+    "mr": LanguageConfig("mr", "Marathi", "मराठी", "Polly.Aditi", "en-IN"),
+    "gu": LanguageConfig("gu", "Gujarati", "ગુજરાતી", "Polly.Aditi", "en-IN"),
+    "kn": LanguageConfig("kn", "Kannada", "ಕನ್ನಡ", "Polly.Aditi", "en-IN"),
+    "ml": LanguageConfig("ml", "Malayalam", "മലയാളം", "Polly.Aditi", "en-IN"),
+    "pa": LanguageConfig("pa", "Punjabi", "ਪੰਜਾਬੀ", "Polly.Aditi", "en-IN"),
 }
 
 
