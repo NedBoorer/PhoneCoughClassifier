@@ -578,6 +578,7 @@ class ModelHub:
             enable_parkinsons: Enable Parkinson's screening (opt-in)
             enable_depression: Enable depression screening (opt-in)
         """
+        print(f"DEBUG: ModelHub.run_full_analysis called for {audio_path}")
         import time
         start_time = time.time()
         
@@ -586,35 +587,45 @@ class ModelHub:
         
         # Respiratory screening (enabled by default)
         if enable_respiratory:
+            print("DEBUG: Running Respiratory Screening...")
             try:
                 resp_result = self.respiratory_classifier.classify(audio_path)
                 screenings["respiratory"] = resp_result
+                print(f"DEBUG: Respiratory Result: {resp_result.disease} ({resp_result.severity})")
             except Exception as e:
+                print(f"DEBUG: Respiratory screening ERROR: {e}")
                 logger.error(f"Respiratory screening failed: {e}")
         
         # Parkinson's screening (opt-in)
         if enable_parkinsons:
+            print("DEBUG: Running Parkinson's Screening...")
             try:
                 pd_result = self.parkinsons_detector.detect(audio_path)
                 screenings["parkinsons"] = pd_result
                 # Extract biomarkers
                 if pd_result.details.get("biomarkers"):
                     voice_biomarkers.update(pd_result.details["biomarkers"])
+                print(f"DEBUG: Parkinson's Result: {pd_result.detected}")
             except Exception as e:
+                print(f"DEBUG: Parkinson's screening ERROR: {e}")
                 logger.error(f"Parkinson's screening failed: {e}")
         
         # Depression screening (opt-in)
         if enable_depression:
+            print("DEBUG: Running Depression Screening...")
             try:
                 dep_result = self.depression_screener.screen(audio_path)
                 screenings["depression"] = dep_result
                 if dep_result.details.get("features"):
                     voice_biomarkers["speaking_rate"] = dep_result.details["features"].get("speaking_rate", 0)
                     voice_biomarkers["pitch_variability"] = dep_result.details["features"].get("pitch_std", 0)
+                print(f"DEBUG: Depression Result: {dep_result.detected}")
             except Exception as e:
+                print(f"DEBUG: Depression screening ERROR: {e}")
                 logger.error(f"Depression screening failed: {e}")
         
         # Determine primary concern and overall risk
+        print("DEBUG: Aggregating results...")
         primary_concern = "none"
         overall_risk = "low"
         recommendations = []
@@ -632,6 +643,7 @@ class ModelHub:
             overall_risk = "low"
         
         processing_time_ms = int((time.time() - start_time) * 1000)
+        print(f"DEBUG: Analysis finished in {processing_time_ms}ms. Overall Risk: {overall_risk}")
         
         return ComprehensiveHealthResult(
             primary_concern=primary_concern,

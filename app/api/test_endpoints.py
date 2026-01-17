@@ -93,6 +93,7 @@ async def test_classify(audio_file: UploadFile = File(...)):
     This endpoint allows testing without making phone calls.
     Supports: WAV, MP3, OGG, WebM, M4A
     """
+    print("DEBUG: Received request at /test/classify")
     # Validate file type
     allowed_types = [
         "audio/wav", "audio/mpeg", "audio/mp3", "audio/ogg",
@@ -100,7 +101,9 @@ async def test_classify(audio_file: UploadFile = File(...)):
     ]
     
     content_type = audio_file.content_type or ""
+    print(f"DEBUG: File content type: {content_type}")
     if not any(t in content_type for t in ["audio", "octet-stream"]):
+        print(f"DEBUG: Invalid content type: {content_type}")
         raise HTTPException(
             status_code=400,
             detail=f"Invalid file type. Expected audio file, got {content_type}"
@@ -109,17 +112,23 @@ async def test_classify(audio_file: UploadFile = File(...)):
     try:
         # Save to temp file
         suffix = Path(audio_file.filename or "audio.wav").suffix or ".wav"
+        print(f"DEBUG: Saving upload to temporary file with suffix {suffix}...")
         with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
             content = await audio_file.read()
             tmp.write(content)
             tmp_path = tmp.name
+        print(f"DEBUG: Saved to {tmp_path}")
         
         # Classify
+        print("DEBUG: Loading classifier...")
         classifier = get_classifier()
+        print(f"DEBUG: Running classification on {tmp_path}...")
         result = classifier.classify(tmp_path)
+        print(f"DEBUG: Classification result: {result.classification}, Confidence: {result.confidence}")
         
         # Clean up
         Path(tmp_path).unlink(missing_ok=True)
+        print("DEBUG: Cleaned up temp file.")
         
         return ClassifyResponse(
             classification=result.classification,
@@ -132,6 +141,9 @@ async def test_classify(audio_file: UploadFile = File(...)):
         )
         
     except Exception as e:
+        print(f"DEBUG: Classification failed: {e}")
+        import traceback
+        traceback.print_exc()
         logger.error(f"Classification failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 

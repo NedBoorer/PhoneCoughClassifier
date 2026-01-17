@@ -37,10 +37,17 @@
 
         <div class="card">
             <h2>Demo: Analyze Audio</h2>
-            <p>Upload a cough recording (.wav or .mp3) to test the AI classifier immediately.</p>
-            <input type="file" id="audio-upload" accept="audio/*" style="margin-bottom: 1rem;">
-            <br>
-            <button id="analyze-btn">Analyze Cough</button>
+            <p>Record a cough sample (approx 5-10 seconds) to test the AI classifier immediately.</p>
+            
+            <div style="margin-bottom: 1rem; display: flex; gap: 10px; align-items: center;">
+                <button id="record-btn" style="background-color: #ef4444;">🔴 Record</button>
+                <button id="stop-btn" style="background-color: #64748b;" disabled>⬛ Stop</button>
+                <span id="recording-status" style="font-size: 0.9rem; color: #64748b;">Ready</span>
+            </div>
+
+            <audio id="audio-preview" controls style="display: none; margin-bottom: 1rem; width: 100%;"></audio>
+            
+            <button id="analyze-btn" disabled>Analyze Recording</button>
             <div id="analysis-result" style="margin-top: 1rem; padding: 1rem; border-radius: 4px; display: none; background-color: #f1f5f9;"></div>
         </div>
 

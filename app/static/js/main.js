@@ -30,24 +30,83 @@ document.addEventListener('DOMContentLoaded', () => {
     loadReferrals();
     initMap();
 
-    // --- Demo Analysis Logic ---
+    // --- Demo Analysis Logic (Microphone) ---
+    const recordBtn = document.getElementById('record-btn');
+    const stopBtn = document.getElementById('stop-btn');
     const analyzeBtn = document.getElementById('analyze-btn');
-    const audioUpload = document.getElementById('audio-upload');
+    const audioPreview = document.getElementById('audio-preview');
     const analysisResult = document.getElementById('analysis-result');
+    const statusSpan = document.getElementById('recording-status');
 
-    if (analyzeBtn && audioUpload) {
+    let mediaRecorder;
+    let audioChunks = [];
+    let audioBlob = null;
+
+    if (recordBtn && stopBtn && analyzeBtn) {
+        // Start Recording
+        recordBtn.addEventListener('click', async () => {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream);
+                audioChunks = [];
+
+                mediaRecorder.ondataavailable = (event) => {
+                    audioChunks.push(event.data);
+                };
+
+                mediaRecorder.onstop = () => {
+                    audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                    const audioUrl = URL.createObjectURL(audioBlob);
+                    audioPreview.src = audioUrl;
+                    audioPreview.style.display = 'block';
+                    analyzeBtn.disabled = false;
+                    statusSpan.textContent = 'Recording recorded. Ready to analyze.';
+                };
+
+                mediaRecorder.start();
+                recordBtn.disabled = true;
+                stopBtn.disabled = false;
+                analyzeBtn.disabled = true;
+                recordBtn.style.opacity = "0.5";
+                stopBtn.style.backgroundColor = "#ef4444"; // Make stop button red
+                statusSpan.textContent = 'Recording...';
+                statusSpan.style.color = '#ef4444';
+                
+            } catch (err) {
+                console.error('Error accessing microphone:', err);
+                alert('Could not access microphone. Please allow permissions.');
+            }
+        });
+
+        // Stop Recording
+        stopBtn.addEventListener('click', () => {
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.stop();
+                mediaRecorder.stream.getTracks().forEach(track => track.stop()); // Stop stream
+                
+                recordBtn.disabled = false;
+                stopBtn.disabled = true;
+                recordBtn.style.opacity = "1";
+                stopBtn.style.backgroundColor = "#64748b"; // Reset color
+                statusSpan.textContent = 'Processing...';
+                statusSpan.style.color = '#64748b';
+            }
+        });
+
+        // Analyze
         analyzeBtn.addEventListener('click', async () => {
-            const file = audioUpload.files[0];
-            if (!file) {
-                alert('Please select an audio file first.');
+            if (!audioBlob) {
+                alert('Please record audio first.');
                 return;
             }
 
             analysisResult.style.display = 'block';
-            analysisResult.textContent = 'Analyzing audio with AI...';
-            
+            analysisResult.textContent = 'Uploading and Analyzing...';
+            analyzeBtn.disabled = true;
+
             const formData = new FormData();
-            formData.append('audio_file', file);
+            // Send as .wav file
+            formData.append('audio_file', audioBlob, 'recording.wav');
 
             try {
                 const response = await fetch('/test/classify', {
@@ -66,6 +125,8 @@ document.addEventListener('DOMContentLoaded', () => {
             } catch (error) {
                 console.error('Analysis failed:', error);
                 analysisResult.textContent = 'Error: Could not analyze audio.';
+            } finally {
+                analyzeBtn.disabled = false;
             }
         });
     }

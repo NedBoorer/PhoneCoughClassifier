@@ -42,6 +42,7 @@ async def run_comprehensive_analysis(
     3. Saves results to DB (partial update)
     """
     try:
+        print(f"DEBUG: Starting comprehensive analysis for call {call_sid} from {caller_number}")
         logger.info(f"Starting comprehensive analysis for call {call_sid}")
         
         # Download recording
@@ -49,18 +50,22 @@ async def run_comprehensive_analysis(
         recordings_dir = settings.recordings_dir
         local_path = recordings_dir / f"{call_sid}.wav"
         
+        print(f"DEBUG: Downloading recording from {recording_url} to {local_path}")
         success = await twilio_service.download_recording(
             recording_url,
             str(local_path)
         )
         
         if not success:
+            print(f"DEBUG: Download failed for {call_sid}")
             logger.error(f"Failed to download recording for {call_sid}")
             return
             
+        print("DEBUG: Download successful. Loading model hub...")
         # Run Analysis
         hub = get_model_hub()
         
+        print("DEBUG: Running full analysis (Respiratory, Parkinson's, Depression)...")
         # We run all available screenings
         result = hub.run_full_analysis(
             str(local_path),
@@ -69,6 +74,8 @@ async def run_comprehensive_analysis(
             enable_depression=settings.enable_depression_screening
         )
         
+        print(f"DEBUG: Analysis complete. Risk Level: {result.overall_risk_level}")
+        print(f"DEBUG: Primary Concern: {result.primary_concern}")
         logger.info(f"Analysis complete for {call_sid}. Risk: {result.overall_risk_level}")
 
         # Extract respiratory screening result safely
@@ -76,12 +83,14 @@ async def run_comprehensive_analysis(
 
         # Retrieve questionnaire data from cache
         questionnaire_data = questionnaire_cache.pop(call_sid, None)
+        print(f"DEBUG: Retrieved questionnaire data: {questionnaire_data}")
         logger.info(f"Questionnaire data for {call_sid}: {questionnaire_data}")
 
         # Save results to database
         from app.database.database import async_session_maker
         from app.database.models import CallRecord, ClassificationResult
 
+        print("DEBUG: Saving results to database...")
         async with async_session_maker() as db:
             # Create or update Call Record
             call_record = CallRecord(
@@ -108,9 +117,11 @@ async def run_comprehensive_analysis(
             db.add(class_result)
             await db.commit()
 
+            print(f"DEBUG: Database save successful. Call ID: {call_record.id}")
             logger.info(f"Saved results to database for call {call_sid}")
 
         # Format and send SMS
+        print("DEBUG: Formatting SMS...")
         sms_message = format_sms_result(
              classification=respiratory_screening.details.get("sound_class", "unknown") if respiratory_screening else "unknown",
              confidence=respiratory_screening.confidence if respiratory_screening else 0.0,
@@ -119,9 +130,14 @@ async def run_comprehensive_analysis(
              comprehensive_result=result
         )
 
+        print(f"DEBUG: Sending SMS to {caller_number}: {sms_message[:50]}...")
         twilio_service.send_sms(caller_number, sms_message)
+        print("DEBUG: SMS sent.")
 
     except Exception as e:
+        print(f"DEBUG: CRITICAL ERROR in analysis: {e}")
+        import traceback
+        traceback.print_exc()
         logger.error(f"Analysis failed for {call_sid}: {e}")
 
 
