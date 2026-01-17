@@ -3,6 +3,48 @@
  * Handles Recording, API Interaction, and UI Updates.
  */
 
+// ==========================================
+// Global State & Translations
+// ==========================================
+let CURRENT_LANG = 'en';
+
+const TRANSLATIONS = {
+    'en': {
+        title: "Namaste! <br><span class='text-primary bg-clip-text text-transparent bg-gradient-to-r from-primary to-secondary'>How is your health today?</span>",
+        subtitle: "I am your personal health companion. I can listen to your cough and help you understand your health.",
+        btn: "Check Your Cough",
+        status: "Tap to start recording (5-10 seconds)",
+        
+        // Dynamic States
+        listening: "Listening...",
+        captured: "Recording captured. Ready to analyze.",
+        processing: "Processing audio...",
+        analyzing: "Analyzing...",
+        analyze_now: "Analyze Now",
+        analyze_again: "Analyze Again",
+        error: "Error",
+        server_error: "Could not reach the server. Please try again.",
+        no_rec: "No specific recommendation available."
+    },
+    'hi': {
+        title: "नमस्ते! <br><span class='text-primary bg-clip-text text-transparent bg-gradient-to-r from-primary to-secondary'>आज आपका स्वास्थ्य कैसा है?</span>",
+        subtitle: "मैं आपका निजी स्वास्थ्य साथी हूँ। मैं आपकी खांसी सुनकर आपके स्वास्थ्य को समझने में मदद कर सकता हूँ।",
+        btn: "अपनी खांसी जांचें",
+        status: "रिकॉर्डिंग शुरू करने के लिए टैप करें (5-10 सेकंड)",
+        
+        // Dynamic States
+        listening: "सुन रहा हूँ...",
+        captured: "रिकॉर्डिंग हो गई। विश्लेषण के लिए तैयार।",
+        processing: "ऑडियो प्रोसेस हो रहा है...",
+        analyzing: "विश्लेषण किया जा रहा है...",
+        analyze_now: "अभी विश्लेषण करें",
+        analyze_again: "फिर से विश्लेषण करें",
+        error: "त्रुटि",
+        server_error: "सर्वर से संपर्क नहीं हो सका। कृपया पुनः प्रयास करें।",
+        no_rec: "कोई विशिष्ट सुझाव उपलब्ध नहीं है।"
+    }
+};
+
 document.addEventListener('DOMContentLoaded', () => {
     console.log('Swasth Saathi initialized.');
     
@@ -10,6 +52,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const recorder = new VoiceRecorder();
     const map = new HealthMap();
     const ui = new UIController();
+
+    // Setup Language
+    setupLanguageSwitcher(ui);
 
     // Bind recording events
     ui.bindRecordingEvents(
@@ -29,6 +74,51 @@ document.addEventListener('DOMContentLoaded', () => {
     // Initialize Map
     map.init();
 });
+
+function setupLanguageSwitcher(uiController) {
+    const btnEn = document.getElementById('lang-en');
+    const btnHi = document.getElementById('lang-hi');
+    const title = document.getElementById('hero-title');
+    const subtitle = document.getElementById('hero-subtitle');
+    const btnText = document.getElementById('btn-record-text');
+    const statusText = document.getElementById('status-text');
+
+    function setLang(lang) {
+        CURRENT_LANG = lang;
+
+        if (lang === 'en') {
+            btnEn.className = "text-sm font-medium text-slate-900 bg-white/50 hover:bg-white px-3 py-1 rounded-full transition-colors shadow-sm ring-1 ring-slate-200";
+            btnHi.className = "text-sm font-medium text-slate-500 hover:text-slate-900 hover:bg-white/50 px-3 py-1 rounded-full transition-colors";
+        } else {
+            btnHi.className = "text-sm font-medium text-slate-900 bg-white/50 hover:bg-white px-3 py-1 rounded-full transition-colors shadow-sm ring-1 ring-slate-200";
+            btnEn.className = "text-sm font-medium text-slate-500 hover:text-slate-900 hover:bg-white/50 px-3 py-1 rounded-full transition-colors";
+        }
+
+        const t = TRANSLATIONS[lang];
+        if (title) title.innerHTML = t.title;
+        if (subtitle) subtitle.textContent = t.subtitle;
+        if (btnText) btnText.textContent = t.btn;
+        
+        // Only update status if idle
+        if (statusText && !statusText.textContent.includes('...')) {
+             statusText.textContent = t.status;
+        }
+        
+        // Refresh UI state text if needed (e.g. if analyzing button is visible)
+        if (uiController) {
+            // Force refresh of button text if needed
+            const analyzeBtn = document.getElementById('analyze-btn');
+            if (analyzeBtn && !analyzeBtn.disabled && !analyzeBtn.classList.contains('hidden')) {
+                analyzeBtn.innerHTML = t.analyze_now; // Or analyze_again depending on state, simplified here
+            }
+        }
+    }
+
+    if (btnEn && btnHi) {
+        btnEn.addEventListener('click', () => setLang('en'));
+        btnHi.addEventListener('click', () => setLang('hi'));
+    }
+}
 
 /**
  * Handles Audio Recording logic using MediaRecorder API.
@@ -92,20 +182,19 @@ class VoiceRecorder {
 
     stop() {
         console.log("VoiceRecorder: Stop requested");
-        this._stopTimer(); // Stop timer immediately
+        this._stopTimer();
 
         if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
             console.log("VoiceRecorder: Stopping media recorder...");
             this.mediaRecorder.stop();
             
-            // Stop all tracks immediately to release mic
+            // Stop all tracks immediately
             if (this.mediaRecorder.stream) {
                 this.mediaRecorder.stream.getTracks().forEach(track => track.stop());
             }
         } else {
-            console.warn("VoiceRecorder: Recorder was already inactive or null.");
-            // Force UI update even if recorder was weird state
-            if (this.onRecordingStop) this.onRecordingStop(null); 
+            console.warn("VoiceRecorder: Recorder was already inactive.");
+            if (this.onRecordingStop) this.onRecordingStop(null);
         }
     }
 
@@ -114,13 +203,12 @@ class VoiceRecorder {
         this.audioBlob = new Blob(this.audioChunks, { type: mimeType });
         const audioUrl = URL.createObjectURL(this.audioBlob);
         
-        // Determine extension based on mimeType for filename
+        // Determine extension
         let ext = 'webm';
         if (mimeType.includes('mp4')) ext = 'mp4';
         if (mimeType.includes('wav')) ext = 'wav';
         this.fileExtension = ext;
 
-        // Notify UI that the FILE is ready (UI might already be in processing state)
         if (this.onRecordingStop) this.onRecordingStop(audioUrl);
     }
 
@@ -190,26 +278,11 @@ class UIController {
     }
 
     bindRecordingEvents(startCallback, stopCallback, analyzeCallback) {
-        // Main Button
         if (this.recordBtn) {
             this.recordBtn.onclick = (e) => {
                 e.preventDefault();
                 console.log("UI: Record button clicked");
                 startCallback();
-            };
-        }
-
-        // Avatar Click (also acts as a button)
-        if (this.avatarContainer) {
-            this.avatarContainer.onclick = (e) => {
-                e.preventDefault();
-                if (this.stopBtn && !this.stopBtn.classList.contains('hidden')) {
-                    console.log("UI: Avatar clicked (Stop)");
-                    this.stopBtn.click(); // Trigger stop logic
-                } else if (this.recordBtn && !this.recordBtn.classList.contains('hidden')) {
-                    console.log("UI: Avatar clicked (Start)");
-                    startCallback();
-                }
             };
         }
         
@@ -219,9 +292,10 @@ class UIController {
                 console.log("UI: Stop button clicked");
                 
                 // Immediate UI Feedback
-                this.stopBtn.disabled = true; // Prevent double clicks
+                this.stopBtn.disabled = true;
                 this.stopBtn.classList.add('opacity-50', 'cursor-wait');
-                this.statusText.textContent = 'Processing audio...';
+                const t = TRANSLATIONS[CURRENT_LANG];
+                this.statusText.textContent = t.processing;
                 
                 stopCallback();
             };
@@ -234,13 +308,29 @@ class UIController {
                 analyzeCallback();
             };
         }
+
+        // Avatar Click (also acts as a button)
+        if (this.avatarContainer) {
+            this.avatarContainer.onclick = (e) => {
+                e.preventDefault();
+                if (this.stopBtn && !this.stopBtn.classList.contains('hidden')) {
+                    console.log("UI: Avatar clicked (Stop)");
+                    this.stopBtn.click(); 
+                } else if (this.recordBtn && !this.recordBtn.classList.contains('hidden')) {
+                    console.log("UI: Avatar clicked (Start)");
+                    startCallback();
+                }
+            };
+        }
     }
 
     setRecordingState(isRecording, audioUrl = null) {
+        const t = TRANSLATIONS[CURRENT_LANG];
+
         if (isRecording) {
             this.recordBtn.classList.add('hidden');
             this.stopBtn.classList.remove('hidden');
-            this.statusText.textContent = 'Listening... (0s)';
+            this.statusText.textContent = `${t.listening} (0s)`;
             this.statusText.className = "mt-4 text-sm font-bold text-accent min-h-[20px] animate-pulse";
             
             // Visualizer
@@ -258,11 +348,11 @@ class UIController {
             this.recordBtn.classList.remove('hidden');
             this.stopBtn.classList.add('hidden');
             
-            // Reset Stop Button State (in case it was disabled during processing)
+            // Reset Stop Button
             this.stopBtn.disabled = false;
             this.stopBtn.classList.remove('opacity-50', 'cursor-wait');
 
-            this.statusText.textContent = 'Recording captured. Ready to analyze.';
+            this.statusText.textContent = t.captured;
             this.statusText.className = "mt-4 text-sm font-medium text-slate-500 min-h-[20px]";
 
             // Reset Visualizer
@@ -277,23 +367,26 @@ class UIController {
                 
                 this.analyzeBtn.disabled = false;
                 this.analyzeBtn.classList.remove('hidden', 'opacity-50', 'cursor-not-allowed');
-                this.analyzeBtn.innerHTML = 'Analyze Now';
+                this.analyzeBtn.innerHTML = t.analyze_now;
                 this.analyzeBtn.classList.add('animate-bounce');
             }
         }
     }
 
     updateTimer(seconds) {
-        this.statusText.textContent = `Listening... (${seconds}s)`;
+        const t = TRANSLATIONS[CURRENT_LANG];
+        this.statusText.textContent = `${t.listening} (${seconds}s)`;
     }
 
     setAnalyzingState(isAnalyzing) {
+        const t = TRANSLATIONS[CURRENT_LANG];
+
         if (isAnalyzing) {
             this.analyzeBtn.disabled = true;
-            this.analyzeBtn.innerHTML = `<svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-white inline-block" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> Analyzing...`;
+            this.analyzeBtn.innerHTML = `<svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-white inline-block" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> ${t.analyzing}`;
             this.analyzeBtn.classList.remove('animate-bounce');
             
-            // Show result section placeholder
+            // Show result section
             this.resultSection.classList.remove('hidden');
             setTimeout(() => {
                 this.resultSection.classList.remove('opacity-0', 'translate-y-4');
@@ -301,22 +394,23 @@ class UIController {
             this.resultSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
         } else {
             this.analyzeBtn.disabled = false;
-            this.analyzeBtn.textContent = 'Analyze Again';
+            this.analyzeBtn.textContent = t.analyze_again;
         }
     }
 
     showResult(data) {
         this.setAnalyzingState(false);
+        const t = TRANSLATIONS[CURRENT_LANG];
         
         // Update Text
         this.resClass.textContent = data.classification || "Unknown";
-        this.resRecommendation.textContent = data.recommendation ? `"${data.recommendation}"` : "No recommendation available.";
+        this.resRecommendation.textContent = data.recommendation ? `"${data.recommendation}"` : t.no_rec;
         
         // Update Confidence
         const conf = data.confidence ? (data.confidence * 100).toFixed(1) : "0.0";
         this.resConfidence.textContent = `${conf}%`;
 
-        // Update Severity Bar & Doctor Connect
+        // Update Severity Bar
         const severity = (data.severity || 'low').toLowerCase();
         let width = '10%';
         let color = 'bg-green-500';
@@ -346,8 +440,9 @@ class UIController {
 
     showError(msg) {
         this.setAnalyzingState(false);
-        this.resClass.textContent = "Error";
-        this.resRecommendation.textContent = msg;
+        const t = TRANSLATIONS[CURRENT_LANG];
+        this.resClass.textContent = t.error;
+        this.resRecommendation.textContent = msg || t.server_error;
     }
 }
 
