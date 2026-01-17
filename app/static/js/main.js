@@ -100,13 +100,16 @@ async function loadReferrals() {
                 ? '<span style="color: #166534; font-size: 0.8rem;">✓ Verified</span>' 
                 : `<button onclick="verifyVisit(${item.id})" style="padding: 0.25rem 0.5rem; font-size: 0.8rem; background-color: #64748b;">Verify Visit</button>`;
 
+            // Health Card Link
+            const cardHtml = `<a href="#" onclick="alert('Digital Health Card generation simulated.'); return false;" style="font-size: 0.8rem; margin-left: 0.5rem;">📄 Card</a>`;
+
             row.innerHTML = `
                 <td>${item.phone}</td>
                 <td style="text-transform: capitalize;">${item.severity}</td>
                 <td>${item.date}</td>
                 <td><span class="status-badge ${statusClass}">${statusLabel}</span></td>
                 <td>${audioHtml}</td>
-                <td>${actionHtml}</td>
+                <td>${actionHtml} ${cardHtml}</td>
             `;
             tableBody.appendChild(row);
         });
@@ -117,10 +120,29 @@ async function loadReferrals() {
 }
 
 async function verifyVisit(callId) {
-    if (!confirm('Mark this patient as verified at the clinic?')) return;
+    // 1. Prompt for Doctor's Diagnosis (Ground Truth)
+    const diagnosis = prompt("Doctor's Diagnosis (Ground Truth):\n\nExamples: 'Normal', 'Viral Infection', 'Tuberculosis', 'COPD'\n\nPlease enter the actual diagnosis:");
+    
+    if (diagnosis === null) return; // User cancelled
+    if (diagnosis.trim() === "") {
+        alert("Diagnosis is required to verify the visit.");
+        return;
+    }
+
+    const notes = prompt("Additional Notes (Optional):");
 
     try {
-        const response = await fetch(`/admin/verify/${callId}`, { method: 'POST' });
+        const response = await fetch(`/admin/verify/${callId}`, { 
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                diagnosis: diagnosis,
+                notes: notes || ""
+            })
+        });
+        
         const result = await response.json();
         
         if (result.status === 'success') {

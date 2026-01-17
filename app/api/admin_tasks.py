@@ -4,11 +4,12 @@ Background jobs for follow-ups and maintenance
 """
 import logging
 from datetime import datetime, timedelta
-from typing import List
+from typing import List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Form
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
+from pydantic import BaseModel
 
 from app.database.database import get_session
 from app.database.models import CallRecord, ClassificationResult
@@ -234,9 +235,17 @@ async def get_referrals(db: AsyncSession = Depends(get_session)):
     return referrals
 
 
+class VerificationRequest(BaseModel):
+    diagnosis: str
+    notes: Optional[str] = ""
+
 @router.post("/verify/{call_id}")
-async def verify_referral(call_id: int, db: AsyncSession = Depends(get_session)):
-    """Mark a referral as verified (doctor check-in)"""
+async def verify_referral(
+    call_id: int, 
+    request: VerificationRequest,
+    db: AsyncSession = Depends(get_session)
+):
+    """Mark a referral as verified with doctor's diagnosis (Ground Truth)"""
     stmt = select(ClassificationResult).where(ClassificationResult.call_id == call_id)
     result = await db.execute(stmt)
     classification = result.scalar_one_or_none()
@@ -246,6 +255,9 @@ async def verify_referral(call_id: int, db: AsyncSession = Depends(get_session))
         
     classification.visit_verified = True
     classification.visit_verified_at = datetime.utcnow()
+    # Store the doctor's diagnosis - this is the Ground Truth for future training!
+    classification.verifier_notes = f"Diagnosis: {request.diagnosis} | Notes: {request.notes}"
+    
     await db.commit()
     
     return {"status": "success"}
