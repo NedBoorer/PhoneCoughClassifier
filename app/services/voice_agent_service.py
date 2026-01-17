@@ -127,31 +127,23 @@ class VoiceAgentService:
         topic = topic_map.get(state.current_step, "general")
         context = rag.get_context_for_topic(topic, state.language, max_chunks=3)
         
-        return f"""You are Swasth Saathi, a warm and trusted health companion.
-        
-IDENTITY:
-- Name: Swasth Saathi (Health Friend)
-- Affiliation: {settings.trusted_authority_name}
-- Role: Caring digital assistant for local doctors.
+        return f"""You are Swasth Saathi, a warm health companion on a phone call.
 
-SOCIAL PROOF (Mention casually if appropriate):
-- "I have already helped {settings.mock_daily_users} people in your area today."
-
-LANGUAGE: {state.language} - Always respond in this language.
+LANGUAGE: {state.language}
 STEP: {state.current_step.value}
 INFO: {state.collected_info}
 
-RULES:
-- 2-3 sentences MAX (it's a phone call)
-- Warm, respectful tone (use "Ji", "Beta" as appropriate)
-- Be influential but patient.
-- Never mention being AI/Robot directly; say you are a "digital service".
-- Emergency: suggest calling 108
+CRITICAL RULES:
+- MAXIMUM 1-2 SHORT sentences (phone call, not text!)
+- Ask ONE question at a time
+- Warm but BRIEF (use "Ji" if Hindi)
+- Never say AI/Robot - say "health service"
+- Emergency → call 108
 
-KNOWLEDGE:
-{context[:500]}
+CONTEXT:
+{context[:300]}
 
-Respond with ONLY the spoken message."""
+Reply with ONLY your short spoken response, no explanation."""
 
     def _determine_next_step(
         self,
@@ -159,38 +151,35 @@ Respond with ONLY the spoken message."""
         user_input: str,
         extracted_info: dict
     ) -> ConversationStep:
-        """Determine the next conversation step based on current state"""
+        """Determine the next conversation step - always progresses toward recording"""
         
         # Check for Handoff Intents FIRST (Safety Net - always active)
         human_keywords = ["human", "person", "doctor", "talk to", "real person", "fake", "robot", "insaan", "baat karni", "asli", "asha"]
         if any(kw in user_input.lower() for kw in human_keywords):
             return ConversationStep.ASHA_HANDOFF
         
+        # Fast-track to recording if user mentions cough - go directly to RECORDING
+        cough_keywords = ["cough", "khansi", "खांसी", "record", "check", "coughing", "khaans", "khasi", "test", "screen"]
+        if any(kw in user_input.lower() for kw in cough_keywords) and current_step not in [ConversationStep.RECORDING, ConversationStep.PROCESSING, ConversationStep.RESULTS]:
+            return ConversationStep.RECORDING
+        
+        # Streamlined flow - always progress toward recording
         transitions = {
-            ConversationStep.GREETING: ConversationStep.OCCUPATION,
-            ConversationStep.LANGUAGE: ConversationStep.OCCUPATION,
+            ConversationStep.GREETING: ConversationStep.SYMPTOMS,  # Skip occupation, get to health faster
+            ConversationStep.LANGUAGE: ConversationStep.SYMPTOMS,
             ConversationStep.OCCUPATION: ConversationStep.SYMPTOMS,
-            ConversationStep.SYMPTOMS: ConversationStep.PESTICIDE_CHECK,
-            ConversationStep.PESTICIDE_CHECK: ConversationStep.DUST_CHECK,
+            ConversationStep.SYMPTOMS: ConversationStep.RECORDING_INTRO,  # Go straight to recording
+            ConversationStep.PESTICIDE_CHECK: ConversationStep.RECORDING_INTRO,
             ConversationStep.DUST_CHECK: ConversationStep.RECORDING_INTRO,
             ConversationStep.RECORDING_INTRO: ConversationStep.RECORDING,
             ConversationStep.RECORDING: ConversationStep.PROCESSING,
             ConversationStep.PROCESSING: ConversationStep.RESULTS,
             ConversationStep.RESULTS: ConversationStep.FAMILY_OFFER,
-            ConversationStep.FAMILY_OFFER: ConversationStep.GOODBYE,
-            ConversationStep.GOODBYE: ConversationStep.GOODBYE,
+            ConversationStep.FAMILY_OFFER: ConversationStep.RECORDING_INTRO,  # Loop back for more coughs!
+            ConversationStep.GOODBYE: ConversationStep.FAMILY_OFFER,  # Never truly goodbye, offer more
         }
-        
-        # Skip pesticide/dust check if not a farmer
-        if current_step == ConversationStep.SYMPTOMS:
-            if not extracted_info.get("is_farmer", False):
-                return ConversationStep.RECORDING_INTRO
-        
-        if current_step == ConversationStep.PESTICIDE_CHECK:
-            if not extracted_info.get("is_farmer", False):
-                return ConversationStep.RECORDING_INTRO
 
-        return transitions.get(current_step, ConversationStep.GOODBYE)
+        return transitions.get(current_step, ConversationStep.RECORDING_INTRO)  # Default to recording
     
     def _extract_info(self, user_input: str, current_step: ConversationStep) -> dict:
         """Extract structured information from user input using LLM"""
@@ -290,8 +279,8 @@ Respond with ONLY the spoken message."""
                         {"role": "system", "content": system_prompt},
                         *state.message_history[-4:],  # Reduced from 6 to 4 for lower cost
                     ],
-                    max_tokens=100,  # Reduced from 150 - voice responses should be short
-                    temperature=0.7,
+                    max_tokens=60,  # Very short for phone call responses
+                    temperature=0.6,  # Lower temp for more consistent, focused responses
                 )
                 
                 message = response.choices[0].message.content.strip()
@@ -313,8 +302,8 @@ Respond with ONLY the spoken message."""
         next_step = self._determine_next_step(state.current_step, user_input, state.collected_info)
         state.current_step = next_step
         
-        # Check if we should record or end
-        should_record = next_step == ConversationStep.RECORDING
+        # Check if we should record or end - trigger recording for both RECORDING and RECORDING_INTRO
+        should_record = next_step in [ConversationStep.RECORDING, ConversationStep.RECORDING_INTRO]
         should_end = next_step == ConversationStep.GOODBYE
         
         return AgentResponse(

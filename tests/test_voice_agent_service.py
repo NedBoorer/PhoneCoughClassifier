@@ -144,17 +144,35 @@ class TestVoiceAgentService:
         
         agent = VoiceAgentService()
         
-        # Greeting -> Occupation
+        # Greeting -> Symptoms (streamlined flow)
         next_step = agent._determine_next_step(
             ConversationStep.GREETING, "", {}
         )
-        assert next_step == ConversationStep.OCCUPATION
-        
-        # Occupation -> Symptoms
-        next_step = agent._determine_next_step(
-            ConversationStep.OCCUPATION, "", {"is_farmer": True}
-        )
         assert next_step == ConversationStep.SYMPTOMS
+        
+        # Symptoms -> Recording Intro
+        next_step = agent._determine_next_step(
+            ConversationStep.SYMPTOMS, "", {"has_cough": True}
+        )
+        assert next_step == ConversationStep.RECORDING_INTRO
+    
+    def test_determine_next_step_cough_fasttrack(self):
+        """Test that mentioning cough fast-tracks to recording"""
+        from app.services.voice_agent_service import VoiceAgentService, ConversationStep
+        
+        agent = VoiceAgentService()
+        
+        # User mentions cough from greeting - should go to recording
+        next_step = agent._determine_next_step(
+            ConversationStep.GREETING, "I have a cough", {}
+        )
+        assert next_step == ConversationStep.RECORDING
+        
+        # User mentions khansi (Hindi) from symptoms - should go to recording
+        next_step = agent._determine_next_step(
+            ConversationStep.SYMPTOMS, "mujhe khansi hai", {}
+        )
+        assert next_step == ConversationStep.RECORDING
     
     def test_determine_next_step_skip_farmer_questions(self):
         """Test skipping farmer questions for non-farmers"""
