@@ -1,0 +1,7 @@
+# Additional dependency for multi-chunk recording with encouragement
+# This enables audio concatenation for the chunked recording feature
+
+pydub>=0.25.1
+
+# Note: pydub requires ffmpeg to be installed on the system
+# Install with: brew install ffmpeg (macOS) or apt-get install ffmpeg (Linux)

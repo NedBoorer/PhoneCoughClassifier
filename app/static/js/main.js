@@ -1,46 +1,103 @@
 document.addEventListener('DOMContentLoaded', () => {
-    console.log('Phone Cough Classifier frontend loaded.');
+    console.log('Swasth Saathi frontend loaded.');
 
-    const checkHealthBtn = document.getElementById('check-health-btn');
-    const statusDiv = document.getElementById('status');
+    const checkHealthBtn = document.getElementById('check-health-btn'); // Hidden but kept for logic if needed
+    
+    // --- Navigation & Language Logic ---
+    setupLanguageSwitcher();
 
-    // --- Health Check Logic ---
-    if (checkHealthBtn) {
-        checkHealthBtn.addEventListener('click', async () => {
-            statusDiv.style.display = 'block';
-            statusDiv.textContent = 'Checking API status...';
-            statusDiv.className = '';
-
-            try {
-                const response = await fetch('/health');
-                const data = await response.json();
-                
-                statusDiv.textContent = `API Status: ${data.status}. Environment: ${data.environment}`;
-                statusDiv.classList.add('success');
-                console.log(data);
-            } catch (error) {
-                console.error('Error checking health:', error);
-                statusDiv.textContent = 'Failed to connect to API.';
-                statusDiv.classList.add('error');
-            }
-        });
-    }
-
-    // --- Admin Panel Logic ---
-    loadReferrals();
+    // --- Admin/Map Logic ---
     initMap();
 
-    // --- Demo Analysis Logic (Microphone) ---
+    // --- Recording & Analysis Logic ---
+    setupRecordingFlow();
+});
+
+// ==========================================
+// Language Switcher (Mock Implementation)
+// ==========================================
+const TRANSLATIONS = {
+    'en': {
+        title: "Namaste! <br><span class='text-primary bg-clip-text text-transparent bg-gradient-to-r from-primary to-secondary'>How is your health today?</span>",
+        subtitle: "I am your personal health companion. I can listen to your cough and help you understand your health.",
+        btn: "Check Your Cough",
+        status: "Tap to start recording (5-10 seconds)",
+        analyzing: "Analyzing Cough Pattern..."
+    },
+    'hi': {
+        title: "नमस्ते! <br><span class='text-primary bg-clip-text text-transparent bg-gradient-to-r from-primary to-secondary'>आज आपका स्वास्थ्य कैसा है?</span>",
+        subtitle: "मैं आपका निजी स्वास्थ्य साथी हूँ। मैं आपकी खांसी सुनकर आपके स्वास्थ्य को समझने में मदद कर सकता हूँ।",
+        btn: "अपनी खांसी जांचें",
+        status: "रिकॉर्डिंग शुरू करने के लिए टैप करें (5-10 सेकंड)",
+        analyzing: "खांसी के पैटर्न का विश्लेषण किया जा रहा है..."
+    }
+};
+
+function setupLanguageSwitcher() {
+    const btnEn = document.getElementById('lang-en');
+    const btnHi = document.getElementById('lang-hi');
+    const title = document.getElementById('hero-title');
+    const subtitle = document.getElementById('hero-subtitle');
+    const btnText = document.getElementById('btn-record-text');
+    const statusText = document.getElementById('status-text');
+
+    function setLang(lang) {
+        // Toggle Active State
+        if (lang === 'en') {
+            btnEn.className = "text-sm font-medium text-slate-900 bg-white/50 hover:bg-white px-3 py-1 rounded-full transition-colors shadow-sm ring-1 ring-slate-200";
+            btnHi.className = "text-sm font-medium text-slate-500 hover:text-slate-900 hover:bg-white/50 px-3 py-1 rounded-full transition-colors";
+        } else {
+            btnHi.className = "text-sm font-medium text-slate-900 bg-white/50 hover:bg-white px-3 py-1 rounded-full transition-colors shadow-sm ring-1 ring-slate-200";
+            btnEn.className = "text-sm font-medium text-slate-500 hover:text-slate-900 hover:bg-white/50 px-3 py-1 rounded-full transition-colors";
+        }
+
+        // Update Text
+        const t = TRANSLATIONS[lang];
+        title.innerHTML = t.title;
+        subtitle.textContent = t.subtitle;
+        btnText.textContent = t.btn;
+        statusText.textContent = t.status;
+    }
+
+    btnEn.addEventListener('click', () => setLang('en'));
+    btnHi.addEventListener('click', () => setLang('hi'));
+}
+
+// ==========================================
+// Recording & Analysis Flow
+// ==========================================
+function setupRecordingFlow() {
     const recordBtn = document.getElementById('record-btn');
     const stopBtn = document.getElementById('stop-btn');
     const analyzeBtn = document.getElementById('analyze-btn');
     const audioPreview = document.getElementById('audio-preview');
-    const analysisResult = document.getElementById('analysis-result');
-    const statusSpan = document.getElementById('recording-status');
+    const statusText = document.getElementById('status-text');
+    const visualizerBars = document.getElementById('visualizer-bars');
+    const avatarContainer = document.getElementById('avatar-container');
+    
+    // Result Elements
+    const resultSection = document.getElementById('result-section');
+    const resClass = document.getElementById('res-classification');
+    const resSeverityBar = document.getElementById('severity-bar');
+    const resConfidence = document.getElementById('res-confidence');
+    const resRecommendation = document.getElementById('res-recommendation');
+    const doctorConnect = document.getElementById('doctor-connect');
 
     let mediaRecorder;
     let audioChunks = [];
     let audioBlob = null;
+    let isRecording = false;
+
+    // Avatar Pulse Effect
+    function setVisualizerState(active) {
+        if (active) {
+            visualizerBars.style.opacity = '1';
+            avatarContainer.classList.add('scale-110');
+        } else {
+            visualizerBars.style.opacity = '0';
+            avatarContainer.classList.remove('scale-110');
+        }
+    }
 
     if (recordBtn && stopBtn && analyzeBtn) {
         // Start Recording
@@ -58,19 +115,33 @@ document.addEventListener('DOMContentLoaded', () => {
                     audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
                     const audioUrl = URL.createObjectURL(audioBlob);
                     audioPreview.src = audioUrl;
-                    audioPreview.style.display = 'block';
+                    audioPreview.classList.remove('hidden');
+                    
                     analyzeBtn.disabled = false;
-                    statusSpan.textContent = 'Recording recorded. Ready to analyze.';
+                    analyzeBtn.classList.remove('hidden', 'opacity-50', 'cursor-not-allowed');
+                    analyzeBtn.classList.add('animate-bounce'); // Draw attention
+                    
+                    statusText.textContent = 'Recording captured. Tap "Analyze Now" to see results.';
+                    setVisualizerState(false);
+                    
+                    // Reset UI slightly
+                    recordBtn.classList.remove('hidden');
+                    stopBtn.classList.add('hidden');
                 };
 
                 mediaRecorder.start();
-                recordBtn.disabled = true;
-                stopBtn.disabled = false;
-                analyzeBtn.disabled = true;
-                recordBtn.style.opacity = "0.5";
-                stopBtn.style.backgroundColor = "#ef4444"; // Make stop button red
-                statusSpan.textContent = 'Recording...';
-                statusSpan.style.color = '#ef4444';
+                isRecording = true;
+                
+                // toggle buttons
+                recordBtn.classList.add('hidden');
+                stopBtn.classList.remove('hidden');
+                
+                statusText.textContent = 'Listening... Please cough clearly.';
+                statusText.className = "mt-4 text-sm font-bold text-accent min-h-[20px] animate-pulse";
+                setVisualizerState(true);
+                
+                // Hide previous results if any
+                resultSection.classList.add('hidden', 'opacity-0', 'translate-y-4');
                 
             } catch (err) {
                 console.error('Error accessing microphone:', err);
@@ -83,55 +154,103 @@ document.addEventListener('DOMContentLoaded', () => {
             if (mediaRecorder && mediaRecorder.state !== 'inactive') {
                 mediaRecorder.stop();
                 mediaRecorder.stream.getTracks().forEach(track => track.stop()); // Stop stream
-                
-                recordBtn.disabled = false;
-                stopBtn.disabled = true;
-                recordBtn.style.opacity = "1";
-                stopBtn.style.backgroundColor = "#64748b"; // Reset color
-                statusSpan.textContent = 'Processing...';
-                statusSpan.style.color = '#64748b';
+                isRecording = false;
+                statusText.className = "mt-4 text-sm font-medium text-slate-500 min-h-[20px]";
             }
         });
 
         // Analyze
         analyzeBtn.addEventListener('click', async () => {
-            if (!audioBlob) {
-                alert('Please record audio first.');
-                return;
-            }
+            if (!audioBlob) return;
 
-            analysisResult.style.display = 'block';
-            analysisResult.textContent = 'Uploading and Analyzing...';
+            // UI Loading State
             analyzeBtn.disabled = true;
+            analyzeBtn.innerHTML = `<svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-white inline-block" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> Analying...`;
+            analyzeBtn.classList.remove('animate-bounce');
+
+            // Show Result Section Placeholder
+            resultSection.classList.remove('hidden');
+            // Small delay to allow display:block to apply before transition
+            setTimeout(() => {
+                resultSection.classList.remove('opacity-0', 'translate-y-4');
+            }, 10);
+            
+            // Scroll to result
+            resultSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
             const formData = new FormData();
-            // Send as .wav file
             formData.append('audio_file', audioBlob, 'recording.wav');
 
             try {
+                // Determine API endpoint - use test endpoint for direct classification
                 const response = await fetch('/test/classify', {
                     method: 'POST',
                     body: formData
                 });
                 const result = await response.json();
 
-                analysisResult.innerHTML = `
-                    <div style="font-weight: bold; margin-bottom: 0.5rem;">Analysis Complete:</div>
-                    <div>Classification: <span style="color: var(--primary-color);">${result.classification}</span></div>
-                    <div>Severity: <span style="color: ${result.severity === 'urgent' ? 'red' : 'orange'};">${result.severity}</span></div>
-                    <div>Confidence: ${(result.confidence * 100).toFixed(1)}%</div>
-                    <div style="margin-top: 0.5rem; font-size: 0.9rem; font-style: italic;">"${result.recommendation}"</div>
-                `;
+                // Update UI with Result
+                updateResultCard(result);
+
             } catch (error) {
                 console.error('Analysis failed:', error);
-                analysisResult.textContent = 'Error: Could not analyze audio.';
+                resClass.textContent = "Error";
+                resRecommendation.textContent = "Could not reach the server. Please try again.";
             } finally {
                 analyzeBtn.disabled = false;
+                analyzeBtn.textContent = 'Analyze Again';
             }
         });
     }
-});
 
+    function updateResultCard(data) {
+        // 1. Classification
+        resClass.textContent = data.classification || "Unknown";
+        
+        // 2. Severity Bar
+        // Map severity to percentage: healthy=5%, mild=40%, urgent=90%
+        let width = '5%';
+        let color = 'bg-green-500';
+        let severity = (data.severity || 'low').toLowerCase();
+
+        if (severity === 'urgent' || severity === 'high') {
+            width = '90%';
+            color = 'bg-red-500';
+            doctorConnect.classList.remove('hidden');
+        } else if (severity === 'moderate' || severity === 'mild') {
+            width = '50%';
+            color = 'bg-yellow-500';
+            doctorConnect.classList.add('hidden');
+        } else {
+            // Healthy/Low
+            width = '10%';
+            color = 'bg-green-500';
+            doctorConnect.classList.add('hidden');
+        }
+        
+        // Reset classes and force reflow for animation
+        resSeverityBar.className = `h-full ${color} transition-all duration-1000 ease-out rounded-full relative`;
+        resSeverityBar.style.width = '0%';
+        setTimeout(() => {
+            resSeverityBar.style.width = width;
+        }, 100);
+
+        // 3. Confidence
+        const conf = data.confidence ? (data.confidence * 100).toFixed(1) : "0.0";
+        resConfidence.textContent = `${conf}%`;
+
+        // 4. Recommendation
+        if (data.recommendation) {
+            resRecommendation.textContent = `"${data.recommendation}"`;
+        } else {
+            resRecommendation.textContent = "No specific recommendation available.";
+        }
+    }
+}
+
+// ==========================================
+// Map Logic (Updated Colors)
+// ==========================================
 async function initMap() {
     const mapDiv = document.getElementById('map');
     if (!mapDiv) return;
@@ -147,130 +266,47 @@ async function initMap() {
         const response = await fetch('/admin/heatmap');
         let data = await response.json();
 
-        // Hack for Demo: If no data, show sample data
-        if (data.length === 0) {
-            console.log("No real data, showing demo heatmap data");
+        // Hack for Demo: Provide Fallback Data
+        if (!data || data.length === 0) {
             data = [
-                { city: "New Delhi", lat: 28.6139, lng: 77.2090, count: 15, high_risk: 5 },
+                { city: "New Delhi", lat: 28.6139, lng: 77.2090, count: 18, high_risk: 8 },
                 { city: "Mumbai", lat: 19.0760, lng: 72.8777, count: 25, high_risk: 12 },
-                { city: "Bangalore", lat: 12.9716, lng: 77.5946, count: 8, high_risk: 1 }
+                { city: "Bangalore", lat: 12.9716, lng: 77.5946, count: 8, high_risk: 1 },
+                { city: "Chennai", lat: 13.0827, lng: 80.2707, count: 12, high_risk: 3 },
+                { city: "Kolkata", lat: 22.5726, lng: 88.3639, count: 15, high_risk: 4 }
             ];
         }
 
         data.forEach(point => {
-            // Color based on % of high risk
             const riskRatio = point.count > 0 ? (point.high_risk / point.count) : 0;
-            let color = '#22c55e'; // Green
-            if (riskRatio > 0.5) color = '#ef4444'; // Red
-            else if (riskRatio > 0.2) color = '#eab308'; // Yellow
+            
+            // New Colors: Green (Teal-ish for safe), Red (Rose for danger)
+            let color = '#0D9488'; // Teal (Safe)
+            if (riskRatio > 0.5) color = '#E11D48'; // Rose (High Risk)
+            else if (riskRatio > 0.2) color = '#F59E0B'; // Amber (Moderate)
 
-            // Radius based on total count
             const radius = Math.max(10, Math.min(point.count * 2, 50)); 
 
             const circle = L.circleMarker([point.lat, point.lng], {
                 color: color,
                 fillColor: color,
                 fillOpacity: 0.6,
-                radius: radius
+                radius: radius,
+                weight: 1
             }).addTo(map);
 
             circle.bindPopup(
                 `
-                <b>${point.city}</b><br>
-                Total Calls: ${point.count}<br>
-                High Risk: ${point.high_risk}
+                <div style="font-family: Inter, sans-serif;">
+                    <strong style="color: #1e293b;">${point.city}</strong><br>
+                    <span style="font-size: 0.8rem; color: #64748b;">Active Cases: ${point.count}</span><br>
+                    <span style="font-size: 0.8rem; color: ${color}; font-weight: bold;">High Risk: ${point.high_risk}</span>
+                </div>
             `
             );
         });
 
     } catch (error) {
         console.error("Error loading heatmap:", error);
-    }
-}
-
-async function loadReferrals() {
-    const tableBody = document.querySelector('#referral-table tbody');
-    if (!tableBody) return;
-
-    try {
-        const response = await fetch('/admin/referrals');
-        const data = await response.json();
-        
-        tableBody.innerHTML = ''; // Clear existing
-
-        if (data.length === 0) {
-            tableBody.innerHTML = '<tr><td colspan="6" style="text-align:center;">No referrals found in database.</td></tr>';
-            return;
-        }
-
-        data.forEach(item => {
-            const row = document.createElement('tr');
-            
-            const statusLabel = item.verified ? 'Checked In' : 'Pending';
-            const statusClass = item.verified ? 'status-success' : 'status-pending';
-            
-            // Audio player
-            const audioHtml = item.recording_url 
-                ? `<audio controls src="${item.recording_url}" style="height: 30px; width: 150px;"></audio>` 
-                : '<span style="color: #94a3b8; font-size: 0.8rem;">No recording</span>';
-
-            // Verify button
-            const actionHtml = item.verified 
-                ? '<span style="color: #166534; font-size: 0.8rem;">✓ Verified</span>' 
-                : `<button onclick="verifyVisit(${item.id})" style="padding: 0.25rem 0.5rem; font-size: 0.8rem; background-color: #64748b;">Verify Visit</button>`;
-
-            // Health Card Link
-            const cardHtml = `<a href="#" onclick="alert('Digital Health Card generation simulated.'); return false;" style="font-size: 0.8rem; margin-left: 0.5rem;">📄 Card</a>`;
-
-            row.innerHTML = `
-                <td>${item.phone}</td>
-                <td style="text-transform: capitalize;">${item.severity}</td>
-                <td>${item.date}</td>
-                <td><span class="status-badge ${statusClass}">${statusLabel}</span></td>
-                <td>${audioHtml}</td>
-                <td>${actionHtml} ${cardHtml}</td>
-            `;
-            tableBody.appendChild(row);
-        });
-    } catch (error) {
-        console.error('Error loading referrals:', error);
-        tableBody.innerHTML = '<tr><td colspan="6" style="text-align:center; color: red;">Error loading data from server.</td></tr>';
-    }
-}
-
-async function verifyVisit(callId) {
-    // 1. Prompt for Doctor's Diagnosis (Ground Truth)
-    const diagnosis = prompt("Doctor's Diagnosis (Ground Truth):\n\nExamples: 'Normal', 'Viral Infection', 'Tuberculosis', 'COPD'\n\nPlease enter the actual diagnosis:");
-    
-    if (diagnosis === null) return; // User cancelled
-    if (diagnosis.trim() === "") {
-        alert("Diagnosis is required to verify the visit.");
-        return;
-    }
-
-    const notes = prompt("Additional Notes (Optional):");
-
-    try {
-        const response = await fetch(`/admin/verify/${callId}`, { 
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                diagnosis: diagnosis,
-                notes: notes || ""
-            })
-        });
-        
-        const result = await response.json();
-        
-        if (result.status === 'success') {
-            loadReferrals(); // Refresh table
-        } else {
-            alert('Error: ' + result.message);
-        }
-    } catch (error) {
-        console.error('Error verifying visit:', error);
-        alert('Failed to connect to server.');
     }
 }

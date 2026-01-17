@@ -8,9 +8,11 @@ from typing import Optional
 from enum import Enum
 
 from openai import OpenAI
+import logging
 
 from app.config import settings
 from app.services.rag_service import get_rag_service
+from app.utils.i18n import get_text
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +132,8 @@ class VoiceAgentService:
         context = rag.get_context_for_topic(topic, state.language, max_chunks=3)
         
         return f"""You are Swasth Saathi, a warm health companion on a phone call.
+        You work with {settings.trusted_authority_name} to help people.
+        Over {settings.mock_daily_users} people have used this service today.
 
 LANGUAGE: {state.language}
 STEP: {state.current_step.value}
@@ -141,9 +145,6 @@ CRITICAL RULES:
 - Warm but BRIEF (use "Ji" if Hindi)
 - Never say AI/Robot - say "health service"
 - Emergency → call 108
-- If TB is mentioned, emphasize it's curable with free treatment (DOTS)
-
-CONTEXT:
 - If TB is mentioned, emphasize it's curable with free treatment (DOTS)
 
 CONTEXT:
@@ -341,52 +342,23 @@ Reply with ONLY your short spoken response, no explanation."""
         )
     
     def _get_fallback_message(self, state: ConversationState) -> str:
-        """Get fallback message if LLM fails"""
-        fallbacks = {
-            ConversationStep.GREETING: {
-                "en": "Hello! I'm your health helper. How are you feeling today?",
-                "hi": "नमस्ते! मैं आपका स्वास्थ्य सहायक हूं। आज आप कैसा महसूस कर रहे हैं?",
-            },
-            ConversationStep.OCCUPATION: {
-                "en": "Are you a farmer or farm worker?",
-                "hi": "क्या आप किसान या खेत मजदूर हैं?",
-            },
-            ConversationStep.SYMPTOMS: {
-                "en": "Do you have any cough, chest pain, or breathing problems?",
-                "hi": "क्या आपको खांसी, सीने में दर्द या सांस लेने में कोई समस्या है?",
-            },
-            ConversationStep.RECORDING_INTRO: {
-                "en": "I'll need to hear your cough. Please cough after the beep.",
-                "hi": "मुझे आपकी खांसी सुननी होगी। बीप के बाद कृपया खांसें।",
-            },
-            ConversationStep.GOODBYE: {
-                "en": "Thank you for calling. Take care and stay healthy!",
-                "hi": "कॉल करने के लिए धन्यवाद। अपना ख्याल रखें और स्वस्थ रहें!",
-            },
-            ConversationStep.ASHA_HANDOFF: {
-                "en": "I understand. Let me connect you to a health worker.",
-                "hi": "मैं समझता हूँ। मैं आपको एक स्वास्थ्य कार्यकर्ता से जोड़ता हूँ।",
-            },
+        """Get fallback message if LLM fails (multilingual)"""
+        # Map conversation steps to i18n keys
+        key_map = {
+            ConversationStep.GREETING: "va_fallback_greeting",
+            ConversationStep.OCCUPATION: "va_fallback_occupation",
+            ConversationStep.SYMPTOMS: "va_fallback_symptoms",
+            ConversationStep.RECORDING_INTRO: "va_fallback_recording",
+            ConversationStep.GOODBYE: "va_fallback_goodbye",
+            ConversationStep.ASHA_HANDOFF: "va_fallback_handoff",
         }
         
-        step_fallbacks = fallbacks.get(state.current_step, fallbacks[ConversationStep.GREETING])
-        return step_fallbacks.get(state.language, step_fallbacks.get("en", "Please continue."))
+        i18n_key = key_map.get(state.current_step, "va_fallback_greeting")
+        return get_text(i18n_key, state.language)
     
     def get_initial_greeting(self, language: str = "en") -> str:
-        """Get the initial greeting message"""
-        greetings = {
-            "en": (
-                "Hello and welcome! I'm Swasth Saathi, your health friend. "
-                "I'm here to help check on your health today. "
-                "Tell me, how are you feeling?"
-            ),
-            "hi": (
-                "नमस्ते और स्वागत है! मैं स्वास्थ साथी हूं, आपका स्वास्थ्य मित्र। "
-                "मैं आज आपकी सेहत की जांच में मदद करने आया हूं। "
-                "बताइए, आप कैसा महसूस कर रहे हैं?"
-            ),
-        }
-        return greetings.get(language, greetings["en"])
+        """Get the initial greeting message (multilingual)"""
+        return get_text("va_greeting", language)
     
     def get_results_message(
         self,
@@ -394,53 +366,34 @@ Reply with ONLY your short spoken response, no explanation."""
         risk_level: str,
         recommendation: str
     ) -> str:
-        """Generate personalized results message"""
+        """Generate personalized results message (multilingual)"""
         collected = state.collected_info
         
         # Normalize risk strings
-        if risk_level == "high_risk":
+        if risk_level in ["high_risk", "severe", "urgent"]:
             risk_level = "high"
-        elif risk_level == "moderate_risk":
+        elif risk_level in ["moderate_risk", "moderate"]:
             risk_level = "moderate"
-        elif risk_level == "low_risk":
-            risk_level = "low"
+        elif risk_level in ["low_risk", "low", "normal"]:
+            risk_level = "normal"
             
         # Escalate risk if pesticide exposure
-        if collected.get("pesticide_exposure") and risk_level in ["low", "normal"]:
+        if collected.get("pesticide_exposure") and risk_level == "normal":
             risk_level = "moderate"
-        
-        if state.language == "hi":
-            if risk_level in ["high", "severe", "urgent"]:
-                return (
-                    f"बेटा, मुझे आपकी सेहत की चिंता है। {recommendation} "
-                    "कृपया आज ही डॉक्टर या DOTS केंद्र से मिलें। मैं आपको रिपोर्ट भेज रहा हूं।"
-                )
-            elif risk_level in ["moderate"]:
-                return (
-                    f"कुछ ध्यान देने की जरूरत है। {recommendation} "
-                    "अगर तकलीफ बढ़े तो डॉक्टर को जरूर दिखाएं।"
-                )
-            else:
-                return (
-                    f"अच्छी बात है, आपकी सेहत ठीक लग रही है। {recommendation} "
-                    "अपना ख्याल रखते रहें।"
-                )
+            
+        # Select message key based on risk
+        if risk_level == "high":
+            key = "va_result_high"
+        elif risk_level == "moderate":
+            key = "va_result_moderate"
         else:
-            if risk_level in ["high", "severe", "urgent"]:
-                return (
-                    f"I'm concerned about what I'm hearing. {recommendation} "
-                    "Please visit a doctor or DOTS center today. I'm sending you a detailed report."
-                )
-            elif risk_level in ["moderate"]:
-                return (
-                    f"There are some things to pay attention to. {recommendation} "
-                    "Please see a doctor if symptoms worsen."
-                )
-            else:
-                return (
-                    f"That's good news, you seem healthy. {recommendation} "
-                    "Keep taking care of yourself."
-                )
+            key = "va_result_normal"
+            
+        # Get template text
+        template = get_text(key, state.language)
+        
+        # Format with recommendation
+        return template.replace("{rec}", recommendation)
 
 
 # Singleton instance

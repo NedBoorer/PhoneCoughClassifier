@@ -3,6 +3,7 @@ Phone Cough Classifier - India Accessibility Webhooks
 Multi-language IVR flow for rural India accessibility
 """
 import logging
+from typing import Optional
 from fastapi import APIRouter, Form, Request, BackgroundTasks
 from fastapi.responses import Response
 from twilio.twiml.voice_response import VoiceResponse, Gather
@@ -39,17 +40,21 @@ LANGUAGE_MAP = {
 
 @router.post("/voice/router")
 async def incoming_call_router(
+    request: Request,
     CallSid: str = Form(...),
     From: str = Form(...),
-    To: str = Form(...)
+    To: str = Form(...),
+    FromCity: Optional[str] = Form(None),
+    FromState: Optional[str] = Form(None),
+    FromCountry: Optional[str] = Form(None),
 ):
     """
     Smart router that directs calls to appropriate service based on number called.
 
     Use this as the main webhook endpoint in Twilio configuration.
     It will route to:
-    - Health screening: if called on TWILIO_PHONE_NUMBER
     - Market service: if called on TWILIO_MARKET_PHONE_NUMBER
+    - Voice Agent (Default): for all other calls (Direct Invocation for speed)
     """
     logger.info(f"Routing call: SID={CallSid}, From={From}, To={To}")
 
@@ -60,7 +65,6 @@ async def incoming_call_router(
         return ''.join(filter(str.isdigit, num))
 
     to_normalized = normalize_number(To)
-    health_number = normalize_number(settings.twilio_phone_number) if settings.twilio_phone_number else ""
     market_number = normalize_number(settings.twilio_market_phone_number) if settings.twilio_market_phone_number else ""
 
     # Route based on which number was called
@@ -68,16 +72,20 @@ async def incoming_call_router(
         # Called the market service number → Mandi Bol
         logger.info(f"Routing to Mandi Bol market service")
         response.redirect(f"{settings.base_url}/india/voice/market/menu")
-    elif settings.enable_voice_agent:
-        # Voice agent is enabled → use conversational AI flow
-        logger.info(f"Routing to conversational voice agent")
-        response.redirect(f"{settings.base_url}/voice-agent/start")
-    else:
-        # Default to DTMF-based health screening service
-        logger.info(f"Routing to health screening service")
-        response.redirect(f"{settings.base_url}/india/voice/incoming")
-
-    return twiml_response(response)
+        return twiml_response(response)
+    
+    # Default: Voice Agent (Conversational AI)
+    # Direct invocation for lowest latency (no redirect)
+    logger.info(f"Routing to conversational voice agent (Direct)")
+    from app.api.voice_agent_webhooks import voice_agent_start
+    return await voice_agent_start(
+        request=request,
+        CallSid=CallSid,
+        From=From,
+        FromCity=FromCity,
+        FromState=FromState,
+        FromCountry=FromCountry
+    )
 
 @router.post("/voice/missed-call")
 async def missed_call_handler(
@@ -98,7 +106,8 @@ async def missed_call_handler(
         
         # Trigger callback in background
         twilio = get_twilio_service()
-        callback_url = f"{settings.base_url}/india/voice/incoming?is_callback=true"
+        # Callback to Voice Agent Start
+        callback_url = f"{settings.base_url}/voice-agent/start"
         twilio.trigger_outbound_call(to=From, callback_url=callback_url)
         
         return twiml_response(response)

@@ -146,200 +146,33 @@ async def run_comprehensive_analysis(
 # ==================
 
 @router.post("/voice/incoming")
-async def incoming_call(request: Request):
-    """
-    Step 1: Welcome & Combined Recording
-    """
-    response = VoiceResponse()
-
-    # Check if voice agent is enabled (Conversational Agent Mode)
-    if settings.enable_voice_agent:
-        logger.info("Redirecting incoming call to Voice Agent")
-        response.redirect(f"{settings.base_url}/voice-agent/start")
-        return twiml_response(response)
-    
-    response.say(
-        "Welcome to the Voice Health Screening. "
-        "I will check for respiratory, vocal, and mood indicators. "
-        "Please cough three times, then say 'The quick brown fox jumps over the lazy dog'. "
-        "Recording starts after the beep.",
-        voice="Polly.Aditi"
-    )
-    
-    response.record(
-        max_length=15,  # Longer for cough + speech
-        timeout=3,
-        play_beep=True,
-        trim="trim-silence",
-        action=f"{settings.base_url}/twilio/voice/handle-recording",
-        recording_status_callback=f"{settings.base_url}/twilio/voice/recording-status"
-    )
-    
-    return twiml_response(response)
-
-
-@router.post("/voice/handle-recording")
-async def handle_recording(
-    background_tasks: BackgroundTasks,
+async def incoming_call(
+    request: Request,
     CallSid: str = Form(...),
     From: str = Form(...),
-    RecordingUrl: str = Form(None)
+    FromCity: Optional[str] = Form(None),
+    FromState: Optional[str] = Form(None),
+    FromCountry: Optional[str] = Form(None),
 ):
     """
-    Step 2: Start Background Analysis & Begin Breath Questionnaire
-    """
-    response = VoiceResponse()
+    Main Entry Point for Incoming Calls.
     
-    if RecordingUrl:
-        # 1. Start Background Analysis (The "Other 2" happening in background)
-        background_tasks.add_task(
-            run_comprehensive_analysis,
-            recording_url=RecordingUrl,
-            call_sid=CallSid,
-            caller_number=From
-        )
-        
-        response.say(
-            "I've received your audio. I am analyzing your cough and voice now. "
-            "While I do that, please answer three quick questions about your breathing.",
-            voice="Polly.Aditi"
-        )
-
-        # 2. Redirect to Questionnaire with call_sid
-        response.redirect(f"{settings.base_url}/twilio/voice/questionnaire/1?call_sid={CallSid}")
-        
-    else:
-        response.say("I didn't hear anything. Please call back to try again.", voice="Polly.Aditi")
-        response.hangup()
-        
-    return twiml_response(response)
-
-
-@router.post("/voice/questionnaire/1")
-async def questionnaire_q1(
-    request: Request,
-    CallSid: str = Form(...),
-    Digits: str = Form(None)
-):
-    """Q1: Shortness of Breath"""
-    # Get Call SID to associate answers
-    query_params = dict(request.query_params)
-    call_sid = query_params.get("call_sid", CallSid)
-
-    response = VoiceResponse()
-    gather = Gather(num_digits=1, action=f"{settings.base_url}/twilio/voice/questionnaire/2?call_sid={call_sid}")
-
-    gather.say(
-        "Question 1: Do you experience shortness of breath when walking? "
-        "Press 1 for Yes. Press 2 for No.",
-        voice="Polly.Aditi"
+    Optimized to directly invoke the Voice Agent (Conversational AI) flow
+    without HTTP redirects, ensuring lowest latency.
+    """
+    logger.info(f"Incoming call from {From}. Route: Voice Agent (Direct Invocation)")
+    
+    # Direct invocation of Voice Agent Service
+    # This avoids the 302 Redirect latency loop
+    from app.api.voice_agent_webhooks import voice_agent_start
+    return await voice_agent_start(
+        request=request,
+        CallSid=CallSid,
+        From=From,
+        FromCity=FromCity,
+        FromState=FromState,
+        FromCountry=FromCountry
     )
-    response.append(gather)
-
-    # Timeout handler - pass "0" for no answer
-    response.redirect(f"{settings.base_url}/twilio/voice/questionnaire/2?call_sid={call_sid}&q1=0")
-
-    return twiml_response(response)
-
-
-@router.post("/voice/questionnaire/2")
-async def questionnaire_q2(
-    request: Request,
-    Digits: str = Form(None)
-):
-    """Q2: Chest Pain"""
-    query_params = dict(request.query_params)
-    call_sid = query_params.get("call_sid", "unknown")
-    q1 = query_params.get("q1", Digits if Digits else "0")
-
-    response = VoiceResponse()
-    gather = Gather(num_digits=1, action=f"{settings.base_url}/twilio/voice/questionnaire/3?call_sid={call_sid}&q1={q1}")
-
-    gather.say(
-        "Question 2: Do you feel any pain or tightness in your chest? "
-        "Press 1 for Yes. Press 2 for No.",
-        voice="Polly.Aditi"
-    )
-    response.append(gather)
-
-    response.say("Moving on.", voice="Polly.Aditi")
-    response.redirect(f"{settings.base_url}/twilio/voice/questionnaire/3?call_sid={call_sid}&q1={q1}&q2=0")
-
-    return twiml_response(response)
-
-
-@router.post("/voice/questionnaire/3")
-async def questionnaire_q3(
-    request: Request,
-    Digits: str = Form(None)
-):
-    """Q3: Smoker"""
-    query_params = dict(request.query_params)
-    call_sid = query_params.get("call_sid", "unknown")
-    q1 = query_params.get("q1", "0")
-    q2 = query_params.get("q2", Digits if Digits else "0")
-
-    response = VoiceResponse()
-    gather = Gather(num_digits=1, action=f"{settings.base_url}/twilio/voice/questionnaire/finish?call_sid={call_sid}&q1={q1}&q2={q2}")
-
-    gather.say(
-        "Last question: Do you smoke tobacco products? "
-        "Press 1 for Yes. Press 2 for No.",
-        voice="Polly.Aditi"
-    )
-    response.append(gather)
-
-    response.redirect(f"{settings.base_url}/twilio/voice/questionnaire/finish?call_sid={call_sid}&q1={q1}&q2={q2}&q3=0")
-
-    return twiml_response(response)
-
-
-# Global dict to store questionnaire answers temporarily (in production, use Redis or database)
-questionnaire_cache = {}
-
-@router.post("/voice/questionnaire/finish")
-async def questionnaire_finish(
-    request: Request,
-    Digits: str = Form(None)
-):
-    """Finish: Wrap up call and save questionnaire data"""
-    query_params = dict(request.query_params)
-    call_sid = query_params.get("call_sid", "unknown")
-    q1 = query_params.get("q1", "0")
-    q2 = query_params.get("q2", "0")
-    q3 = query_params.get("q3", Digits if Digits else "0")
-
-    # Store questionnaire answers in cache (keyed by call_sid)
-    questionnaire_cache[call_sid] = {
-        "shortness_of_breath": q1 == "1",
-        "chest_pain": q2 == "1",
-        "smoker": q3 == "1",
-        "answers_raw": {"q1": q1, "q2": q2, "q3": q3}
-    }
-
-    logger.info(f"Questionnaire complete for {call_sid}: {questionnaire_cache[call_sid]}")
-
-    response = VoiceResponse()
-
-    response.say(
-        "Thank you. I have finished analyzing your voice and your answers. "
-        "You will receive a detailed health report via text message shortly. "
-        "Goodbye and stay healthy.",
-        voice="Polly.Aditi"
-    )
-    response.hangup()
-
-    return twiml_response(response)
-
-
-@router.post("/voice/recording-status")
-async def recording_status():
-    return Response(status_code=200)
-
-
-@router.post("/voice/status")
-async def call_status():
-    return Response(status_code=200)
 
 
 @router.post("/sms/incoming")

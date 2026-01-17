@@ -18,6 +18,7 @@ from app.services.voice_agent_service import (
 )
 from app.services.twilio_service import get_twilio_service, format_sms_result
 from app.ml.model_hub import get_model_hub
+from app.utils import i18n
 from app.utils.i18n import get_language_config
 from app.database.database import async_session_maker
 from app.database.models import CallRecord, ClassificationResult
@@ -28,11 +29,28 @@ router = APIRouter()
 
 # In-memory state cache (in production, use Redis)
 _call_states: dict[str, dict] = {}
+_state_lock = None  # Lazy init to avoid import issues
+
+# Background analysis results cache
+_analysis_results: dict[str, dict] = {}  # {call_sid: {"status": "processing|complete|error", "result": ...}}
+
+# Multi-chunk recording storage
+_recording_chunks: dict[str, list] = {}  # {call_sid: [chunk1_url, chunk2_url, ...]}
 
 # Constants for call flow control
 MAX_NO_INPUT_ATTEMPTS = 5
 MAX_RECORDING_ATTEMPTS = 3
 MAX_FAMILY_SCREENINGS = 5
+MAX_RESULTS_POLL_ATTEMPTS = 3  # Max times to check for results
+
+
+def _get_state_lock():
+    """Get or create thread lock for state management"""
+    global _state_lock
+    if _state_lock is None:
+        import threading
+        _state_lock = threading.Lock()
+    return _state_lock
 
 
 def _get_voice_config(language: str) -> tuple[str, str]:
@@ -49,11 +67,93 @@ def _get_call_info(call_sid: str) -> dict:
 
 
 def _cleanup_call(call_sid: str):
-    """Clean up call state and agent state"""
+    """Clean up call state, agent state, and recordings"""
     logger.info(f"Cleaning up state for {call_sid}")
+
+    # Clean up agent state
     agent = get_voice_agent_service()
     agent.clear_state(call_sid)
-    _call_states.pop(call_sid, None)
+
+    # Thread-safe removal from call states, analysis results, and recording chunks
+    lock = _get_state_lock()
+    with lock:
+        _call_states.pop(call_sid, None)
+        _analysis_results.pop(call_sid, None)
+        _recording_chunks.pop(call_sid, None)
+
+    # CRITICAL: Clean up audio files to prevent memory leak
+    # Recordings accumulate and fill disk if not deleted
+    try:
+        import os
+        # Clean up main recording
+        recording_path = settings.recordings_dir / f"{call_sid}_agent.wav"
+        if recording_path.exists():
+            os.remove(recording_path)
+            logger.info(f"Deleted recording: {recording_path}")
+
+        # Clean up any chunk files
+        for i in range(10):  # Check up to 10 chunks
+            chunk_path = settings.recordings_dir / f"{call_sid}_chunk{i}.wav"
+            if chunk_path.exists():
+                os.remove(chunk_path)
+                logger.debug(f"Deleted chunk: {chunk_path}")
+    except Exception as e:
+        logger.warning(f"Failed to delete recording for {call_sid}: {e}")
+
+
+def _get_encouragement_messages(language: str, chunk_number: int) -> str:
+    """
+    Get encouraging messages to play between recording chunks.
+
+    These keep the user motivated during multi-chunk recording.
+
+    Args:
+        language: Language code (en/hi)
+        chunk_number: Which chunk we're on (1, 2, 3...)
+
+    Returns:
+        Encouraging message string
+    """
+    # Select key based on chunk number (1, 2, 3)
+    # Map chunk number to i18n key suffix
+    key_suffix = min(chunk_number, 3)
+    i18n_key = f"va_encouragement_{key_suffix}"
+    
+    return i18n.get_text(i18n_key, language)
+
+
+def _get_health_tips(language: str, duration_seconds: int = 10) -> list[str]:
+    """
+    Get health education messages to play during analysis.
+
+    These keep the user engaged while ML models run in background.
+    Messages are timed to fill the expected analysis duration.
+
+    Args:
+        language: Language code (en/hi)
+        duration_seconds: Target duration in seconds
+
+    Returns:
+        List of messages (each ~3-4 seconds when spoken)
+    """
+    if language == "hi":
+        tips = [
+            "क्या आप जानते हैं? रोज़ाना गहरी सांस लेने से फेफड़े मज़बूत होते हैं।",
+            "अगर खांसी दो हफ्ते से ज़्यादा रहे, तो डॉक्टर को ज़रूर दिखाएं।",
+            "टीबी का इलाज मुफ्त और पूरी तरह संभव है। DOTS सेंटर पर जाएं।",
+            "धूम्रपान और धुआं से दूर रहें। आपके फेफड़े आपको धन्यवाद देंगे।",
+        ]
+    else:
+        tips = [
+            "Did you know? Deep breathing exercises daily can strengthen your lungs.",
+            "If your cough lasts more than two weeks, please see a doctor.",
+            "TB is completely curable with free treatment available at DOTS centers.",
+            "Avoid smoking and smoke exposure. Your lungs will thank you.",
+        ]
+
+    # Return subset based on duration (each tip ~3-4 seconds)
+    num_tips = min(len(tips), max(2, duration_seconds // 3))
+    return tips[:num_tips]
 
 
 @router.post("/start")
@@ -81,16 +181,18 @@ async def voice_agent_start(
     state = agent.get_or_create_state(CallSid)
     state.language = language
     
-    # Store caller info with tracking counters
-    _call_states[CallSid] = {
-        "caller_number": From,
-        "language": language,
-        "city": FromCity,
-        "state": FromState,
-        "country": FromCountry,
-        "recording_attempts": 0,
-        "family_screenings": 0,
-    }
+    # Store caller info with tracking counters (thread-safe)
+    lock = _get_state_lock()
+    with lock:
+        _call_states[CallSid] = {
+            "caller_number": From,
+            "language": language,
+            "city": FromCity,
+            "state": FromState,
+            "country": FromCountry,
+            "recording_attempts": 0,
+            "family_screenings": 0,
+        }
     
     # Get initial greeting
     greeting = agent.get_initial_greeting(language)
@@ -257,29 +359,44 @@ async def _handle_recording_request(
     voice: str,
     lang_code: str
 ) -> Response:
-    """Handle the cough recording step"""
-    
-    # Recording instruction (dynamic based on config)
+    """Handle the cough recording step with optional multi-chunk encouragement"""
+
+    # Check if chunked recording is enabled
+    if getattr(settings, 'enable_chunked_recording', False):
+        # Multi-chunk recording with encouragement between chunks
+        return await _handle_chunked_recording(response, call_sid, language, voice, lang_code)
+    else:
+        # Single recording (original behavior)
+        return await _handle_single_recording(response, call_sid, language, voice, lang_code)
+
+
+async def _handle_single_recording(
+    response: VoiceResponse,
+    call_sid: str,
+    language: str,
+    voice: str,
+    lang_code: str
+) -> Response:
+    """Handle single continuous recording (original method)"""
+
     duration = settings.max_recording_duration
     if language == "hi":
         instruction = (
-            "अब मुझे आपकी खांसी सुननी है। "
-            "बीप के बाद, कृपया जोर से खांसें। "
-            f"मैं {duration} सेकंड के लिए सुनूंगा।"
+            "बहुत अच्छा! अब मुझे आपकी खांसी सुननी है। "
+            "बीप के बाद, अपनी सामान्य खांसी जैसे खांसें। "
+            f"लगभग {duration} सेकंड तक खांसते रहें।"
         )
     else:
         instruction = (
-            "Now I need to hear your cough. "
-            "After the beep, please cough clearly. "
-            f"I'll listen for about {duration} seconds."
+            "Perfect! Now I need to hear your cough. "
+            "After the beep, cough naturally like you normally do. "
+            f"Keep coughing for about {duration} seconds."
         )
-    
+
     response.say(instruction, voice=voice, language=lang_code)
-    
     response.pause(length=1)
-    
+
     # Record cough
-    # Note: trim="trim-silence" removed to prevent dropping quiet recordings
     response.record(
         max_length=settings.max_recording_duration,
         timeout=3,
@@ -287,8 +404,254 @@ async def _handle_recording_request(
         action=f"./recording-complete?lang={language}",
         recording_status_callback=f"{settings.base_url}/twilio/voice/recording-status",
     )
-    
+
     return twiml_response(response)
+
+
+async def _handle_chunked_recording(
+    response: VoiceResponse,
+    call_sid: str,
+    language: str,
+    voice: str,
+    lang_code: str
+) -> Response:
+    """
+    Handle multi-chunk recording with encouragement between chunks.
+
+    This allows us to say things like "Great! Keep going..." between
+    recording segments, creating a more engaging experience.
+    """
+
+    # Initialize chunk storage if not exists
+    lock = _get_state_lock()
+    with lock:
+        if call_sid not in _recording_chunks:
+            _recording_chunks[call_sid] = []
+
+    chunk_duration = getattr(settings, 'recording_chunk_duration', 3)
+
+    if language == "hi":
+        instruction = (
+            "बहुत अच्छा! अब मुझे आपकी खांसी सुननी है। "
+            "बीप के बाद, जोर से खांसें। मैं बीच में आपको प्रोत्साहित करूंगा। शुरू करें!"
+        )
+    else:
+        instruction = (
+            "Perfect! Now let me hear your cough. "
+            "After the beep, cough loudly. I'll encourage you along the way. Let's begin!"
+        )
+
+    response.say(instruction, voice=voice, language=lang_code)
+    response.pause(length=1)
+
+    # Start first chunk
+    response.record(
+        max_length=chunk_duration,
+        timeout=2,
+        play_beep=True,
+        action=f"./recording-chunk-complete?lang={language}&chunk=1",
+        recording_status_callback=f"{settings.base_url}/twilio/voice/recording-status",
+    )
+
+    return twiml_response(response)
+
+
+@router.post("/recording-chunk-complete")
+async def recording_chunk_complete(
+    request: Request,
+    CallSid: str = Form(...),
+    RecordingUrl: Optional[str] = Form(None),
+):
+    """
+    Handle completion of one recording chunk and transition to next chunk or final processing.
+    """
+    query_params = dict(request.query_params)
+    language = query_params.get("lang", "en")
+    chunk_num = int(query_params.get("chunk", 1))
+
+    voice, lang_code = _get_voice_config(language)
+    response = VoiceResponse()
+
+    logger.info(f"Chunk {chunk_num} complete for {CallSid}, URL={RecordingUrl}")
+
+    # Store chunk URL
+    if RecordingUrl:
+        lock = _get_state_lock()
+        with lock:
+            if CallSid not in _recording_chunks:
+                _recording_chunks[CallSid] = []
+            _recording_chunks[CallSid].append(RecordingUrl)
+
+    max_chunks = getattr(settings, 'max_recording_chunks', 3)
+
+    if chunk_num >= max_chunks:
+        # All chunks done! Proceed to combine and analyze
+        logger.info(f"All {max_chunks} chunks recorded for {CallSid}")
+
+        response.say(
+            "Perfect! Thank you!" if language == "en" else "बिल्कुल सही! धन्यवाद!",
+            voice=voice,
+            language=lang_code
+        )
+
+        # Instead of immediately analyzing, mark that we need to combine chunks
+        # and redirect to the normal recording-complete flow
+        response.redirect(f"./combine-and-analyze?lang={language}")
+        return twiml_response(response)
+
+    # More chunks needed - give encouragement and continue
+    encouragement = _get_encouragement_messages(language, chunk_num)
+    response.say(encouragement, voice=voice, language=lang_code)
+    response.pause(length=0.5)
+
+    # Record next chunk
+    chunk_duration = getattr(settings, 'recording_chunk_duration', 3)
+    response.record(
+        max_length=chunk_duration,
+        timeout=2,
+        play_beep=False,  # No beep for subsequent chunks (smoother)
+        action=f"./recording-chunk-complete?lang={language}&chunk={chunk_num + 1}",
+        recording_status_callback=f"{settings.base_url}/twilio/voice/recording-status",
+    )
+
+    return twiml_response(response)
+
+
+@router.post("/combine-and-analyze")
+async def combine_and_analyze(
+    background_tasks: BackgroundTasks,
+    request: Request,
+    CallSid: str = Form(...),
+    From: str = Form(...),
+):
+    """
+    Combine multiple recording chunks into one file and start analysis.
+    """
+    query_params = dict(request.query_params)
+    language = query_params.get("lang", "en")
+
+    voice, lang_code = _get_voice_config(language)
+    response = VoiceResponse()
+
+    # Get all chunk URLs
+    lock = _get_state_lock()
+    with lock:
+        chunk_urls = _recording_chunks.get(CallSid, [])
+
+    if not chunk_urls:
+        logger.error(f"No recording chunks found for {CallSid}")
+        response.say(
+            "I didn't receive your recording. Let's try again."
+            if language == "en" else
+            "मुझे आपकी रिकॉर्डिंग नहीं मिली। फिर से कोशिश करते हैं।",
+            voice=voice,
+            language=lang_code
+        )
+        response.redirect(f"./continue?lang={language}&step=recording")
+        return twiml_response(response)
+
+    logger.info(f"Combining {len(chunk_urls)} chunks for {CallSid}")
+
+    # Start background task to combine chunks and analyze
+    with lock:
+        _analysis_results[CallSid] = {"status": "processing", "result": None, "error": None}
+
+    background_tasks.add_task(
+        _combine_and_analyze_chunks,
+        CallSid=CallSid,
+        chunk_urls=chunk_urls,
+        language=language,
+    )
+
+    # While combining/analyzing, share health tips
+    response.say(
+        "Thank you! Let me analyze your cough while I share some health information."
+        if language == "en" else
+        "धन्यवाद! मैं आपकी खांसी की जांच करता हूं। इस दौरान कुछ स्वास्थ्य जानकारी देता हूं।",
+        voice=voice,
+        language=lang_code
+    )
+
+    response.pause(length=1)
+
+    # Share health tips during processing
+    health_tips = _get_health_tips(language, duration_seconds=10)
+    for tip in health_tips:
+        response.say(tip, voice=voice, language=lang_code)
+        response.pause(length=1)
+
+    # Check results
+    response.redirect(f"./check-results?lang={language}&attempt=1")
+
+    return twiml_response(response)
+
+
+async def _combine_and_analyze_chunks(CallSid: str, chunk_urls: list, language: str):
+    """
+    Background task: Download chunks, combine into one file, and run analysis.
+    """
+    lock = _get_state_lock()
+
+    try:
+        logger.info(f"Combining {len(chunk_urls)} chunks for {CallSid}")
+        twilio_service = get_twilio_service()
+
+        # Download all chunks
+        chunk_files = []
+        for i, url in enumerate(chunk_urls):
+            chunk_path = settings.recordings_dir / f"{CallSid}_chunk{i}.wav"
+            await twilio_service.download_recording(url, str(chunk_path))
+            chunk_files.append(chunk_path)
+            logger.debug(f"Downloaded chunk {i}: {chunk_path}")
+
+        # Combine chunks using pydub
+        try:
+            from pydub import AudioSegment
+
+            combined = AudioSegment.empty()
+            for chunk_path in chunk_files:
+                audio = AudioSegment.from_wav(str(chunk_path))
+                combined += audio
+
+            # Export combined file
+            final_path = settings.recordings_dir / f"{CallSid}_agent.wav"
+            combined.export(str(final_path), format="wav")
+            logger.info(f"Combined {len(chunk_files)} chunks into {final_path}")
+
+        except ImportError:
+            # Fallback: Use first chunk only if pydub not available
+            logger.warning("pydub not available, using first chunk only")
+            final_path = chunk_files[0]
+
+        # Run analysis on combined file
+        logger.info(f"Running ML analysis for {CallSid}")
+        hub = get_model_hub()
+        result = await hub.run_full_analysis_async(
+            str(final_path),
+            enable_respiratory=settings.enable_respiratory_screening,
+            enable_parkinsons=settings.enable_parkinsons_screening,
+            enable_depression=settings.enable_depression_screening,
+            enable_tuberculosis=settings.enable_tuberculosis_screening,
+        )
+        logger.info(f"Analysis complete for {CallSid}: risk={result.overall_risk_level}, time={result.processing_time_ms}ms")
+
+        # Store results
+        with lock:
+            _analysis_results[CallSid] = {
+                "status": "complete",
+                "result": result,
+                "error": None,
+                "recording_url": chunk_urls[0] if chunk_urls else "",  # Store first chunk URL
+            }
+
+    except Exception as e:
+        logger.error(f"Chunk combination/analysis failed for {CallSid}: {e}", exc_info=True)
+        with lock:
+            _analysis_results[CallSid] = {
+                "status": "error",
+                "result": None,
+                "error": str(e),
+            }
 
 
 @router.post("/recording-complete")
@@ -312,9 +675,11 @@ async def recording_complete(
     response = VoiceResponse()
     
     if not RecordingUrl:
-        # Track recording attempts to prevent infinite loops
-        call_info = _call_states.get(CallSid, {})
-        recording_attempts = call_info.get("recording_attempts", 0) + 1
+        # Track recording attempts to prevent infinite loops (thread-safe)
+        lock = _get_state_lock()
+        with lock:
+            call_info = _call_states.get(CallSid, {})
+            recording_attempts = call_info.get("recording_attempts", 0) + 1
 
         if recording_attempts >= MAX_RECORDING_ATTEMPTS:
             logger.warning(f"Max recording attempts ({MAX_RECORDING_ATTEMPTS}) reached for {CallSid}")
@@ -329,9 +694,10 @@ async def recording_complete(
             _cleanup_call(CallSid)
             return twiml_response(response)
 
-        # Update attempt counter
-        if CallSid in _call_states:
-            _call_states[CallSid]["recording_attempts"] = recording_attempts
+        # Update attempt counter (thread-safe)
+        with lock:
+            if CallSid in _call_states:
+                _call_states[CallSid]["recording_attempts"] = recording_attempts
 
         logger.info(f"No recording received, attempt {recording_attempts}/{MAX_RECORDING_ATTEMPTS}")
         response.say(
@@ -352,27 +718,67 @@ async def recording_complete(
     
     response.pause(length=1)
 
-    # Processing message with realistic expectation
+    # Start background analysis immediately
+    # This allows us to talk to the user while processing happens
+    logger.info(f"Starting background analysis for {CallSid}, RecordingUrl={RecordingUrl}")
+
+    # Mark analysis as processing
+    lock = _get_state_lock()
+    with lock:
+        _analysis_results[CallSid] = {"status": "processing", "result": None, "error": None}
+
+    # Start analysis in background task
+    background_tasks.add_task(
+        _run_background_analysis,
+        CallSid=CallSid,
+        RecordingUrl=RecordingUrl,
+        language=language,
+    )
+
+    # UX IMPROVEMENT: Keep talking while analysis runs!
+    # Instead of awkward silence, provide health education
     response.say(
-        "Let me analyze your cough. This will take a few seconds..." if language == "en"
-        else "मैं आपकी खांसी की जांच करता हूं। इसमें कुछ सेकंड लगेंगे...",
+        "Thank you! Let me analyze your cough while I share some health information with you."
+        if language == "en" else
+        "धन्यवाद! मैं आपकी खांसी की जांच करता हूं। इस दौरान मैं आपको कुछ स्वास्थ्य जानकारी देता हूं।",
         voice=voice,
         language=lang_code
     )
 
-    # Add a brief pause for processing feel
-    response.pause(length=2)
-    
-    # Analyze recording
+    response.pause(length=1)
+
+    # Share health tips to fill ~10 seconds while analysis runs
+    health_tips = _get_health_tips(language, duration_seconds=10)
+    for tip in health_tips:
+        response.say(tip, voice=voice, language=lang_code)
+        response.pause(length=1)
+
+    # By now, analysis should be complete or nearly complete
+    # Redirect to check results
+    response.redirect(f"./check-results?lang={language}&attempt=1")
+
+    return twiml_response(response)
+
+
+async def _run_background_analysis(CallSid: str, RecordingUrl: str, language: str):
+    """
+    Run ML analysis in background while user hears health tips.
+
+    This decouples analysis from TwiML response, enabling better UX.
+    Results are stored in _analysis_results for retrieval.
+    """
+    lock = _get_state_lock()
+
     try:
-        logger.info(f"Starting analysis for {CallSid}, RecordingUrl={RecordingUrl}")
+        logger.info(f"Background analysis starting for {CallSid}")
         twilio_service = get_twilio_service()
         local_path = settings.recordings_dir / f"{CallSid}_agent.wav"
 
-        # Download might fail if URL is not public/reachable, handle gracefully
+        # Download recording
         logger.debug(f"Downloading recording to {local_path}")
         await twilio_service.download_recording(RecordingUrl, str(local_path))
-        
+
+        # Run analysis
         logger.info(f"Running ML analysis for {CallSid}")
         hub = get_model_hub()
         result = await hub.run_full_analysis_async(
@@ -382,137 +788,25 @@ async def recording_complete(
             enable_depression=settings.enable_depression_screening,
             enable_tuberculosis=settings.enable_tuberculosis_screening,
         )
-        logger.info(f"Analysis complete for {CallSid}: risk={result.overall_risk_level}, concern={result.primary_concern}, time={result.processing_time_ms}ms")
+        logger.info(f"Analysis complete for {CallSid}: risk={result.overall_risk_level}, time={result.processing_time_ms}ms")
 
-        # Handle timeout case
-        if result.primary_concern == "timeout":
-            response.say(
-                "The analysis is taking longer than expected. Let me try again quickly."
-                if language == "en" else
-                "विश्लेषण में अधिक समय लग रहा है। मैं जल्दी से फिर से कोशिश करता हूं।",
-                voice=voice,
-                language=lang_code
-            )
-            response.redirect(f"./continue?lang={language}&step=recording")
-            return twiml_response(response)
+        # Store results with RecordingUrl for database
+        with lock:
+            _analysis_results[CallSid] = {
+                "status": "complete",
+                "result": result,
+                "error": None,
+                "recording_url": RecordingUrl,  # Save for database
+            }
 
-        # --- SAVE TO DATABASE ---
-        try:
-            call_info = _call_states.get(CallSid, {})
-            async with async_session_maker() as db:
-                # Create Call Record
-                call_record = CallRecord(
-                    call_sid=CallSid,
-                    caller_number=call_info.get("caller_number", From),
-                    language=language,
-                    call_status="completed",
-                    recording_url=RecordingUrl,
-                    city=call_info.get("city"),
-                    state=call_info.get("state"),
-                    country=call_info.get("country")
-                )
-                db.add(call_record)
-                await db.flush()
-
-                # Create Classification Result
-                # Map overall risk to simple classification for the table
-                classification_str = result.primary_concern if result.primary_concern != "none" else "Normal"
-                
-                class_result = ClassificationResult(
-                    call_id=call_record.id,
-                    classification=classification_str,
-                    confidence=0.85 if result.overall_risk_level in ["high", "urgent"] else 0.95, # Mock confidence for aggregate
-                    severity=result.overall_risk_level,
-                    recommendation=result.recommendation,
-                    processing_time_ms=result.processing_time_ms
-                )
-                db.add(class_result)
-                await db.commit()
-                logger.info(f"Saved DB record for {CallSid}")
-        except Exception as db_err:
-            logger.error(f"Database save failed: {db_err}")
-        # ------------------------
-        
-        # Get agent state for personalized response
-        agent = get_voice_agent_service()
-        state = agent.get_state(CallSid)
-
-        # Generate personalized results message
-        if state and hasattr(state, 'collected_info'):
-            results_message = agent.get_results_message(
-                state,
-                result.overall_risk_level,
-                result.recommendation,
-            )
-            state.current_step = ConversationStep.RESULTS
-        else:
-            # Fallback if state not found
-            results_message = f"Your health check is complete. {result.recommendation}"
-        
-        response.say(results_message, voice=voice, language=lang_code)
-        
-        # Send WhatsApp/SMS report
-        caller_number = _call_states.get(CallSid, {}).get("caller_number", From)
-        if settings.enable_whatsapp_reports:
-            background_tasks.add_task(
-                _send_report,
-                caller_number,
-                result,
-                language,
-            )
-        
-        # Offer family screening
-        response.pause(length=1)
-        
-        gather = Gather(
-            input="speech dtmf",
-            action=f"./family-decision?lang={language}",
-            timeout=8,
-            num_digits=1,
-            speech_timeout="auto",
-            language=lang_code,
-        )
-        
-        gather.say(
-            "Is there anyone else in your family who has a cough? Say yes or press 1 to check them too."
-            if language == "en" else
-            "क्या आपके परिवार में कोई और खांस रहा है? हां कहें या 1 दबाएं उनकी जांच के लिए।",
-            voice=voice,
-            language=lang_code
-        )
-        
-        response.append(gather)
-        
-        # Default to goodbye if no response
-        response.redirect(f"./goodbye?lang={language}")
-        
     except Exception as e:
-        logger.error(f"Analysis failed for {CallSid}: {type(e).__name__}: {e}", exc_info=True)
-
-        # Check if it's a download error vs analysis error
-        error_msg = str(e).lower()
-        if "download" in error_msg or "url" in error_msg or "network" in error_msg:
-            logger.error(f"Recording download failed for {CallSid}")
-            response.say(
-                "I couldn't access your recording. Please try again."
-                if language == "en" else
-                "मैं आपकी रिकॉर्डिंग तक नहीं पहुंच सका। कृपया फिर से कोशिश करें।",
-                voice=voice,
-                language=lang_code
-            )
-            response.redirect(f"./continue?lang={language}&step=recording")
-        else:
-            logger.error(f"ML analysis failed for {CallSid}")
-            response.say(
-                "I'm sorry, I had trouble analyzing your cough. Please try calling again later."
-                if language == "en" else
-                "माफ़ कीजिए, मुझे खांसी की जांच में दिक्कत हुई। कृपया बाद में फिर से कॉल करें।",
-                voice=voice,
-                language=lang_code
-            )
-            response.redirect(f"./goodbye?lang={language}")
-    
-    return twiml_response(response)
+        logger.error(f"Background analysis failed for {CallSid}: {type(e).__name__}: {e}", exc_info=True)
+        with lock:
+            _analysis_results[CallSid] = {
+                "status": "error",
+                "result": None,
+                "error": str(e),
+            }
 
 
 async def _send_report(caller_number: str, result, language: str):
@@ -554,9 +848,11 @@ async def family_decision(
     # Check for yes response
     yes_indicators = ["yes", "1", "haan", "हां", "one", "ek"]
     if Digits == "1" or any(ind in user_input for ind in yes_indicators):
-        # Check family screening limit
-        call_info = _call_states.get(CallSid, {})
-        family_count = call_info.get("family_screenings", 0) + 1
+        # Check family screening limit (thread-safe)
+        lock = _get_state_lock()
+        with lock:
+            call_info = _call_states.get(CallSid, {})
+            family_count = call_info.get("family_screenings", 0) + 1
 
         if family_count >= MAX_FAMILY_SCREENINGS:
             logger.info(f"Max family screenings ({MAX_FAMILY_SCREENINGS}) reached for {CallSid}")
@@ -570,10 +866,11 @@ async def family_decision(
             response.redirect(f"./goodbye?lang={language}")
             return twiml_response(response)
 
-        # Update family screening counter
-        if CallSid in _call_states:
-            _call_states[CallSid]["family_screenings"] = family_count
-            _call_states[CallSid]["recording_attempts"] = 0  # Reset recording attempts
+        # Update family screening counter (thread-safe)
+        with lock:
+            if CallSid in _call_states:
+                _call_states[CallSid]["family_screenings"] = family_count
+                _call_states[CallSid]["recording_attempts"] = 0  # Reset recording attempts
 
         # Reset for next family member
         agent = get_voice_agent_service()
@@ -748,6 +1045,215 @@ async def handle_no_input(
     return twiml_response(response)
 
 
+@router.post("/check-results")
+async def check_results(
+    request: Request,
+    CallSid: str = Form(...),
+    From: str = Form(...),
+):
+    """
+    Check if background analysis is complete and present results.
+
+    If still processing, say "almost ready" and poll again.
+    This creates a smooth UX without awkward silence.
+    """
+    query_params = dict(request.query_params)
+    language = query_params.get("lang", "en")
+    attempt = int(query_params.get("attempt", 1))
+
+    voice, lang_code = _get_voice_config(language)
+    response = VoiceResponse()
+
+    # Check analysis status
+    lock = _get_state_lock()
+    with lock:
+        analysis_data = _analysis_results.get(CallSid, {})
+
+    status = analysis_data.get("status", "unknown")
+    logger.info(f"Check results for {CallSid}: status={status}, attempt={attempt}")
+
+    if status == "complete":
+        # Analysis done! Present results
+        result = analysis_data.get("result")
+
+        if not result:
+            logger.error(f"Analysis marked complete but no result for {CallSid}")
+            response.say(
+                "I had trouble processing your results. Please try again."
+                if language == "en" else
+                "परिणाम की प्रक्रिया में दिक्कत हुई। कृपया फिर से कोशिश करें।",
+                voice=voice,
+                language=lang_code
+            )
+            response.redirect(f"./goodbye?lang={language}")
+            return twiml_response(response)
+
+        # Handle timeout case
+        if result.primary_concern == "timeout":
+            response.say(
+                "The analysis took too long. Let me try with a shorter recording."
+                if language == "en" else
+                "विश्लेषण में बहुत समय लगा। छोटी रिकॉर्डिंग से कोशिश करें।",
+                voice=voice,
+                language=lang_code
+            )
+            response.redirect(f"./continue?lang={language}&step=recording")
+            return twiml_response(response)
+
+        # Present results (reusing existing logic)
+        return await _present_results(response, CallSid, From, result, language, voice, lang_code)
+
+    elif status == "error":
+        # Analysis failed
+        error = analysis_data.get("error", "Unknown error")
+        logger.error(f"Analysis error for {CallSid}: {error}")
+
+        error_msg_lower = str(error).lower()
+        if "download" in error_msg_lower or "url" in error_msg_lower:
+            response.say(
+                "I couldn't access your recording. Please try again."
+                if language == "en" else
+                "मैं रिकॉर्डिंग तक नहीं पहुंच सका। कृपया फिर से कोशिश करें।",
+                voice=voice,
+                language=lang_code
+            )
+            response.redirect(f"./continue?lang={language}&step=recording")
+        else:
+            response.say(
+                "I had trouble analyzing your cough. Please try calling back later."
+                if language == "en" else
+                "खांसी की जांच में दिक्कत हुई। कृपया बाद में फिर से कॉल करें।",
+                voice=voice,
+                language=lang_code
+            )
+            response.redirect(f"./goodbye?lang={language}")
+
+        return twiml_response(response)
+
+    else:
+        # Still processing
+        if attempt >= MAX_RESULTS_POLL_ATTEMPTS:
+            # Taking too long, apologize and retry
+            logger.warning(f"Analysis timeout for {CallSid} after {attempt} poll attempts")
+            response.say(
+                "The analysis is taking longer than expected. Let me try with a fresh recording."
+                if language == "en" else
+                "विश्लेषण में अधिक समय लग रहा है। नई रिकॉर्डिंग से कोशिश करते हैं।",
+                voice=voice,
+                language=lang_code
+            )
+            response.redirect(f"./continue?lang={language}&step=recording")
+            return twiml_response(response)
+
+        # Still processing, give positive feedback and check again
+        response.say(
+            "Almost ready, just one more moment..." if language == "en"
+            else "बस हो गया, एक पल और...",
+            voice=voice,
+            language=lang_code
+        )
+        response.pause(length=2)
+        response.redirect(f"./check-results?lang={language}&attempt={attempt + 1}")
+        return twiml_response(response)
+
+
+async def _present_results(response, CallSid, From, result, language, voice, lang_code):
+    """Present analysis results to user (extracted for reuse)"""
+    # --- SAVE TO DATABASE ---
+    try:
+        call_info = _call_states.get(CallSid, {})
+        # Get recording URL from analysis results
+        lock = _get_state_lock()
+        with lock:
+            analysis_data = _analysis_results.get(CallSid, {})
+        recording_url = analysis_data.get("recording_url", "")
+
+        async with async_session_maker() as db:
+            # Create Call Record
+            call_record = CallRecord(
+                call_sid=CallSid,
+                caller_number=call_info.get("caller_number", From),
+                language=language,
+                call_status="completed",
+                recording_url=recording_url,
+                city=call_info.get("city"),
+                state=call_info.get("state"),
+                country=call_info.get("country")
+            )
+            db.add(call_record)
+            await db.flush()
+
+            # Create Classification Result
+            classification_str = result.primary_concern if result.primary_concern != "none" else "Normal"
+
+            class_result = ClassificationResult(
+                call_id=call_record.id,
+                classification=classification_str,
+                confidence=0.85 if result.overall_risk_level in ["high", "urgent"] else 0.95,
+                severity=result.overall_risk_level,
+                recommendation=result.recommendation,
+                processing_time_ms=result.processing_time_ms
+            )
+            db.add(class_result)
+            await db.commit()
+            logger.info(f"Saved DB record for {CallSid}")
+    except Exception as db_err:
+        logger.error(f"Database save failed: {db_err}")
+    # ------------------------
+
+    # Get agent state for personalized response
+    agent = get_voice_agent_service()
+    state = agent.get_state(CallSid)
+
+    # Generate personalized results message
+    if state and hasattr(state, 'collected_info'):
+        results_message = agent.get_results_message(
+            state,
+            result.overall_risk_level,
+            result.recommendation,
+        )
+        state.current_step = ConversationStep.RESULTS
+    else:
+        # Fallback if state not found
+        results_message = f"Your health check is complete. {result.recommendation}"
+
+    response.say(results_message, voice=voice, language=lang_code)
+
+    # Send WhatsApp/SMS report
+    caller_number = call_info.get("caller_number", From)
+    if settings.enable_whatsapp_reports:
+        # Don't use background_tasks here, use a new task
+        import asyncio
+        asyncio.create_task(_send_report(caller_number, result, language))
+
+    # Offer family screening
+    response.pause(length=1)
+
+    gather = Gather(
+        input="speech dtmf",
+        action=f"./family-decision?lang={language}",
+        timeout=8,
+        num_digits=1,
+        speech_timeout="auto",
+        language=lang_code,
+    )
+
+    gather.say(
+        "Is there anyone else in your family who has a cough? Say yes or press 1 to check them too."
+        if language == "en" else
+        "क्या आपके परिवार में कोई और खांस रहा है? हां कहें या 1 दबाएं उनकी जांच के लिए।",
+        voice=voice,
+        language=lang_code
+    )
+
+    response.append(gather)
+
+    # Default to goodbye if no response
+    response.redirect(f"./goodbye?lang={language}")
+
+    return twiml_response(response)
+
+
 @router.post("/goodbye")
 async def goodbye(
     request: Request,
@@ -756,11 +1262,11 @@ async def goodbye(
     """End the call with a warm goodbye"""
     query_params = dict(request.query_params)
     language = query_params.get("lang", "en")
-    
+
     voice, lang_code = _get_voice_config(language)
-    
+
     response = VoiceResponse()
-    
+
     response.say(
         "Thank you for calling! Take care of yourself and stay healthy. Goodbye!"
         if language == "en" else
@@ -768,7 +1274,7 @@ async def goodbye(
         voice=voice,
         language=lang_code
     )
-    
+
     response.hangup()
 
     # Clean up state
