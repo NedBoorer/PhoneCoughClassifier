@@ -42,7 +42,7 @@ _recording_chunks: dict[str, list] = {}  # {call_sid: [chunk1_url, chunk2_url, .
 MAX_NO_INPUT_ATTEMPTS = 5
 MAX_RECORDING_ATTEMPTS = 3
 MAX_FAMILY_SCREENINGS = 5
-MAX_RESULTS_POLL_ATTEMPTS = 3  # Max times to check for results
+MAX_RESULTS_POLL_ATTEMPTS = 6  # Max times to check for results (6 x 3s = ~18s)
 
 
 def _get_state_lock():
@@ -155,6 +155,33 @@ def _get_health_tips(language: str, duration_seconds: int = 10) -> list[str]:
     # Return subset based on duration (each tip ~3-4 seconds)
     num_tips = min(len(tips), max(2, duration_seconds // 3))
     return tips[:num_tips]
+
+
+def _get_filler_question(attempt: int, language: str) -> tuple[str, str]:
+    """
+    Get a conversational filler question to ask while analysis runs.
+    
+    Returns:
+        Tuple of (question_text, question_key) - key is used to store response
+    """
+    questions = {
+        "en": [
+            ("While I analyze, let me ask - do you have a fever right now?", "fever"),
+            ("Thank you. Are you experiencing any chest pain?", "chest_pain"),
+            ("Got it. Do you smoke or are you exposed to smoke regularly?", "smoke"),
+            ("Understood. Almost done with your analysis.", "done"),
+        ],
+        "hi": [
+            ("जब मैं जांच कर रहा हूं, बताइए - क्या आपको बुखार है?", "fever"),
+            ("धन्यवाद। क्या आपको सीने में दर्द है?", "chest_pain"),
+            ("समझ गया। क्या आप धूम्रपान करते हैं या धुएं के संपर्क में रहते हैं?", "smoke"),
+            ("समझ गया। आपकी रिपोर्ट लगभग तैयार है।", "done"),
+        ]
+    }
+    
+    lang_questions = questions.get(language, questions["en"])
+    idx = min(attempt - 1, len(lang_questions) - 1)
+    return lang_questions[idx]
 
 
 @router.post("/start")
@@ -1167,7 +1194,7 @@ async def check_results(
         return twiml_response(response)
 
     else:
-        # Still processing
+        # Still processing - engage user with conversational questions
         if attempt >= MAX_RESULTS_POLL_ATTEMPTS:
             # Taking too long, apologize and retry
             logger.warning(f"Analysis timeout for {CallSid} after {attempt} poll attempts")
@@ -1181,15 +1208,29 @@ async def check_results(
             response.redirect(f"/voice-agent/continue?lang={language}&step=recording")
             return twiml_response(response)
 
-        # Still processing, give positive feedback and check again
-        response.say(
-            "Almost ready, just one more moment..." if language == "en"
-            else "बस हो गया, एक पल और...",
-            voice=voice,
-            language=lang_code
-        )
-        response.pause(length=2)
-        response.redirect(f"/voice-agent/check-results?lang={language}&attempt={attempt + 1}")
+        # Get a conversational filler question
+        question_text, question_key = _get_filler_question(attempt, language)
+        
+        if question_key == "done":
+            # Final attempt - just say almost done and check again
+            response.say(question_text, voice=voice, language=lang_code)
+            response.pause(length=2)
+            response.redirect(f"/voice-agent/check-results?lang={language}&attempt={attempt + 1}")
+        else:
+            # Ask a question and gather response
+            gather = Gather(
+                input="speech dtmf",
+                action=f"/voice-agent/filler-response?lang={language}&attempt={attempt}&key={question_key}",
+                timeout=5,
+                speech_timeout="auto",
+                language=lang_code,
+                hints="yes, no, haan, nahi, 1, 2",
+            )
+            gather.say(question_text, voice=voice, language=lang_code)
+            response.append(gather)
+            # If no input, just continue checking
+            response.redirect(f"/voice-agent/check-results?lang={language}&attempt={attempt + 1}")
+        
         return twiml_response(response)
 
 
