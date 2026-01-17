@@ -3,6 +3,8 @@ Voice Agent Service
 Conversational AI agent for personalized health screening interactions
 """
 import logging
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Optional
 from enum import Enum
@@ -89,6 +91,7 @@ class VoiceAgentService:
         self._conversations: dict[str, ConversationState] = {}
         self._response_cache: dict[str, str] = {}  # Cache for common responses
         self._cache_max_size = 50
+        self._executor = ThreadPoolExecutor(max_workers=10)  # For concurrent OpenAI calls
     
     @property
     def client(self) -> OpenAI:
@@ -297,12 +300,17 @@ Reply with ONLY your short spoken response, no explanation."""
                     if isinstance(msg, dict) and "role" in msg and "content" in msg:
                         messages.append(msg)
 
-                response = self.client.chat.completions.create(
-                    model=settings.voice_agent_model if hasattr(settings, 'voice_agent_model') else "gpt-4o-mini",
-                    messages=messages,
-                    max_tokens=60,  # Very short for phone call responses
-                    temperature=0.6,  # Lower temp for more consistent, focused responses
-                    timeout=10.0,  # Add timeout for LLM calls
+                # Run OpenAI call in thread pool to avoid blocking the event loop
+                loop = asyncio.get_event_loop()
+                response = await loop.run_in_executor(
+                    self._executor,
+                    lambda: self.client.chat.completions.create(
+                        model=settings.voice_agent_model if hasattr(settings, 'voice_agent_model') else "gpt-4o-mini",
+                        messages=messages,
+                        max_tokens=60,
+                        temperature=0.6,
+                        timeout=10.0,
+                    )
                 )
 
                 message = response.choices[0].message.content.strip()
