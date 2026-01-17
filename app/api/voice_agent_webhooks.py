@@ -17,6 +17,7 @@ from app.services.voice_agent_service import (
     ConversationStep,
 )
 from app.services.twilio_service import get_twilio_service, format_sms_result
+from app.services.whatsapp_service import get_whatsapp_service
 from app.ml.model_hub import get_model_hub
 from app.utils import i18n
 from app.utils.i18n import get_language_config
@@ -820,18 +821,45 @@ def _run_background_analysis(CallSid: str, RecordingUrl: str, language: str):
 async def _send_report(caller_number: str, result, language: str):
     """Background task to send health report via WhatsApp/SMS"""
     try:
-        twilio_service = get_twilio_service()
+        # Try WhatsApp first if enabled
+        whatsapp_sent = False
+        if settings.enable_whatsapp_reports:
+            try:
+                whatsapp = get_whatsapp_service()
+                logger.info(f"Attempting to send WhatsApp report to {caller_number}")
+                
+                # Check if we should send a full card or just text
+                # Ideally send the card
+                whatsapp_sent = whatsapp.send_health_card(
+                    to=caller_number,
+                    result=result,
+                    language=language
+                )
+                
+                if whatsapp_sent:
+                    logger.info(f"WhatsApp report sent to {caller_number}")
+            except Exception as wa_e:
+                logger.error(f"Failed to send WhatsApp report: {wa_e}")
+                # Fallback to SMS
         
-        report_text = format_sms_result(
-            classification="N/A",
-            confidence=0,
-            recommendation=result.recommendation,
-            language=language,
-            comprehensive_result=result,
-        )
-        
-        twilio_service.send_sms(caller_number, report_text)
-        logger.info(f"Report sent to {caller_number}")
+        # If WhatsApp disabled or failed, send SMS
+        if not whatsapp_sent:
+            twilio_service = get_twilio_service()
+            
+            report_text = format_sms_result(
+                classification="N/A",  # Deprecated field
+                confidence=0,
+                recommendation=result.recommendation,
+                language=language,
+                comprehensive_result=result,
+            )
+            
+            # Add disclaimer if it was a fallback
+            if settings.enable_whatsapp_reports:
+                report_text += "\n(Sent via SMS as WhatsApp delivery failed)"
+            
+            twilio_service.send_sms(caller_number, report_text)
+            logger.info(f"SMS report sent to {caller_number}")
         
     except Exception as e:
         logger.error(f"Failed to send report: {e}")

@@ -536,3 +536,52 @@ async def list_screening_models():
     
     return {"models": models}
 
+@router.post("/send-whatsapp-report")
+async def test_send_whatsapp_report(
+    to: str = Query(..., description="Target phone number (E.164 format)"),
+    language: str = Query("en", description="Language code (en/hi)"),
+):
+    """
+    Test sending a health report via WhatsApp.
+    
+    This manually triggers the report sending logic used in the voice agent.
+    Values are mocked for demonstration.
+    """
+    try:
+        from app.services.whatsapp_service import get_whatsapp_service
+        from app.ml.model_hub import ComprehensiveHealthResult, ScreeningResult
+        
+        # Create mock result
+        result = ComprehensiveHealthResult(
+            primary_concern="none",
+            overall_risk_level="normal",
+            processing_time_ms=123,
+            recommendation="Your lung sounds are normal. Keep maintaining good health!"
+        )
+        # Add a dummy screening
+        result.screenings["respiratory"] = ScreeningResult(
+            disease="repiratory",
+            detected=False,
+            confidence=0.95,
+            severity="normal",
+            details={"sound_class": "normal"},
+            recommendation="No respiratory issues detected."
+        )
+        
+        service = get_whatsapp_service()
+        
+        # Attempt send
+        success = service.send_health_card(
+            to=to,
+            result=result,
+            language=language
+        )
+        
+        if success:
+            return {"status": "success", "message": f"WhatsApp report sent to {to}"}
+        else:
+            return {"status": "error", "message": "Failed to send WhatsApp report (check logs)"}
+            
+    except Exception as e:
+        logger.error(f"Test WhatsApp output failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
