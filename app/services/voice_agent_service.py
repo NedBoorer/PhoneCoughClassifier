@@ -185,6 +185,7 @@ Reply with ONLY your short, emotionally appropriate spoken response. No explanat
         """Analyze conversation history to detect emotional cues and provide guidance"""
         emotions_detected = []
         guidance = []
+        special_context = []
         
         # Get recent user messages
         recent_user_messages = [
@@ -193,54 +194,128 @@ Reply with ONLY your short, emotionally appropriate spoken response. No explanat
             if isinstance(msg, dict) and msg.get("role") == "user"
         ]
         combined_text = " ".join(recent_user_messages)
+        latest_msg = recent_user_messages[-1] if recent_user_messages else ""
         
-        # Emotional keyword detection (English + Hindi)
-        worry_words = ["worried", "worry", "anxious", "nervous", "tension", "chinta", "चिंता", "fikar", "फ़िक्र", "pareshan", "परेशान"]
-        pain_words = ["pain", "hurt", "hurts", "painful", "ache", "dard", "दर्द", "taklif", "तकलीफ़", "dukh", "दुख"]
-        fear_words = ["scared", "afraid", "fear", "frightened", "terrified", "dar", "डर", "bhay", "भय", "ghabra", "घबरा"]
-        frustration_words = ["frustrated", "angry", "annoyed", "irritated", "enough", "gussa", "गुस्सा", "tang", "तंग"]
-        sadness_words = ["sad", "depressed", "hopeless", "alone", "lonely", "crying", "dukhi", "दुखी", "udas", "उदास", "akela", "अकेला"]
-        relief_words = ["better", "relieved", "good", "okay", "fine", "theek", "ठीक", "acha", "अच्छा", "rahat", "राहत"]
-        confusion_words = ["don't understand", "confused", "what", "kya", "क्या", "samajh nahi", "समझ नहीं"]
+        # ============ EMOTIONAL KEYWORD DETECTION (English + Hindi + Regional) ============
+        
+        # Core emotions
+        worry_words = ["worried", "worry", "anxious", "nervous", "tension", "chinta", "चिंता", "fikar", "फ़िक्र", "pareshan", "परेशान", "ghabrahat", "घबराहट"]
+        pain_words = ["pain", "hurt", "hurts", "painful", "ache", "severe", "unbearable", "dard", "दर्द", "taklif", "तकलीफ़", "dukh", "दुख", "peeda", "पीड़ा", "kasht", "कष्ट"]
+        fear_words = ["scared", "afraid", "fear", "frightened", "terrified", "dar", "डर", "bhay", "भय", "ghabra", "घबरा", "khatara", "खतरा"]
+        frustration_words = ["frustrated", "angry", "annoyed", "irritated", "enough", "fed up", "waste", "gussa", "गुस्सा", "tang", "तंग", "thak gaya", "थक गया"]
+        sadness_words = ["sad", "depressed", "hopeless", "alone", "lonely", "crying", "cried", "tears", "dukhi", "दुखी", "udas", "उदास", "akela", "अकेला", "rona", "रोना"]
+        relief_words = ["better", "relieved", "good", "great", "okay", "fine", "happy", "theek", "ठीक", "acha", "अच्छा", "rahat", "राहत", "khush", "खुश"]
+        confusion_words = ["don't understand", "confused", "what do you mean", "kya matlab", "क्या मतलब", "samajh nahi", "समझ नहीं", "pata nahi", "पता नहीं"]
+        
+        # NEW: Additional emotional states
+        urgency_words = ["urgent", "emergency", "immediately", "right now", "quickly", "asap", "dying", "can't breathe", "jaldi", "जल्दी", "abhi", "अभी", "turant", "तुरंत", "bahut bura", "बहुत बुरा"]
+        gratitude_words = ["thank", "thanks", "grateful", "bless", "appreciate", "shukriya", "शुक्रिया", "dhanyawad", "धन्यवाद", "meherbani", "मेहरबानी"]
+        exhaustion_words = ["tired", "exhausted", "weak", "no energy", "can't sleep", "thaka", "थका", "kamzor", "कमज़ोर", "neend nahi", "नींद नहीं", "thak gaya", "थक गया"]
+        shame_words = ["embarrassed", "ashamed", "shy", "don't want to say", "sharm", "शर्म", "lajja", "लज्जा", "hesitate", "hichak", "हिचक"]
+        trust_words = ["trust you", "believe", "hope", "faith", "bharosa", "भरोसा", "vishwas", "विश्वास", "umeed", "उम्मीद"]
+        
+        # Symptom severity indicators
+        severity_words = ["very", "extremely", "really bad", "getting worse", "for weeks", "for months", "bahut", "बहुत", "zyada", "ज़्यादा", "kaafi", "काफ़ी", "hafte se", "महीने से"]
+        
+        # ============ EMOTION DETECTION ============
+        
+        if any(word in combined_text for word in urgency_words):
+            emotions_detected.append("🚨 URGENT")
+            guidance.append("User needs immediate help - prioritize speed and reassurance, skip pleasantries")
         
         if any(word in combined_text for word in worry_words):
             emotions_detected.append("WORRIED")
-            guidance.append("User seems anxious - be extra reassuring and gentle")
+            guidance.append("Be extra reassuring: 'Don't worry, you've done the right thing by calling'")
         
         if any(word in combined_text for word in pain_words):
             emotions_detected.append("IN PAIN")
-            guidance.append("User is experiencing discomfort - show genuine concern")
+            if any(word in combined_text for word in severity_words):
+                emotions_detected.append("⚠️ SEVERE PAIN")
+                guidance.append("User has significant pain - express deep concern, consider if emergency referral needed")
+            else:
+                guidance.append("Show genuine concern: 'I'm sorry you're going through this'")
         
         if any(word in combined_text for word in fear_words):
             emotions_detected.append("FEARFUL")
-            guidance.append("User is scared - validate their feelings first")
+            guidance.append("Validate fear first: 'I understand this is frightening. You're not alone'")
         
         if any(word in combined_text for word in frustration_words):
             emotions_detected.append("FRUSTRATED")
-            guidance.append("User seems impatient - be efficient and understanding")
+            guidance.append("Acknowledge and be efficient: 'I understand, let me help you quickly'")
         
         if any(word in combined_text for word in sadness_words):
             emotions_detected.append("SAD")
-            guidance.append("User sounds low - be warm and supportive")
+            guidance.append("Be warm and present: 'I hear you. Please know you're not alone in this'")
+        
+        if any(word in combined_text for word in exhaustion_words):
+            emotions_detected.append("EXHAUSTED")
+            guidance.append("Be gentle and supportive: 'I can hear how tired you are. Let's make this easy for you'")
+        
+        if any(word in combined_text for word in shame_words):
+            emotions_detected.append("EMBARRASSED")
+            guidance.append("Normalize and reassure: 'There's nothing to be embarrassed about. Many people face this'")
         
         if any(word in combined_text for word in relief_words):
             emotions_detected.append("POSITIVE/RELIEVED")
-            guidance.append("User sounds positive - mirror their energy")
+            guidance.append("Mirror positive energy: 'I'm so glad to hear that!'")
+        
+        if any(word in combined_text for word in gratitude_words):
+            emotions_detected.append("GRATEFUL")
+            guidance.append("Warmly acknowledge: 'Of course! I'm here to help'")
+        
+        if any(word in combined_text for word in trust_words):
+            emotions_detected.append("TRUSTING")
+            guidance.append("Honor their trust: 'Thank you for trusting me. I'll do my best to help you'")
         
         if any(word in combined_text for word in confusion_words):
             emotions_detected.append("CONFUSED")
-            guidance.append("User seems confused - explain clearly and simply")
+            guidance.append("Be patient and clear: 'Let me explain more simply...'")
         
-        # Check for short/hesitant responses (possible nervousness)
-        if recent_user_messages and len(recent_user_messages[-1]) < 15:
-            if "POSITIVE" not in str(emotions_detected):
-                guidance.append("User is giving short responses - gently encourage them to share more")
+        # ============ CONVERSATION PACING & CONTEXT ============
         
-        # Build output
+        # Check for silence/very short responses
+        if latest_msg in ["", "[silence]", "hmm", "okay", "ok", "haan", "हां", "ha", "हा"]:
+            special_context.append("User is quiet - gently encourage: 'Please take your time, I'm listening'")
+        elif len(latest_msg) < 10 and "POSITIVE" not in str(emotions_detected):
+            special_context.append("Short response - they may be hesitant. Encourage gently")
+        
+        # Detect if user is elderly (common patterns)
+        elder_indicators = ["my age", "years old", "old person", "budha", "बूढ़ा", "umr", "उम्र", "bachche", "बच्चे", "grandson", "pota", "पोता"]
+        if any(word in combined_text for word in elder_indicators):
+            special_context.append("Possibly elderly caller - be extra respectful, use 'Aap', speak clearly")
+        
+        # Detect if calling for someone else
+        proxy_indicators = ["my mother", "my father", "my wife", "my husband", "my child", "meri maa", "मेरी माँ", "mere papa", "मेरे पापा", "mera bacha", "मेरा बच्चा"]
+        if any(word in combined_text for word in proxy_indicators):
+            special_context.append("Calling for a family member - acknowledge their care and concern")
+        
+        # Repeated questions = possible frustration or hearing issues
+        if state.turn_count > 3 and len(set(recent_user_messages)) < len(recent_user_messages):
+            special_context.append("User may be repeating themselves - verify understanding, speak more clearly")
+        
+        # ============ BUILD OUTPUT ============
+        
+        result_parts = []
+        
         if emotions_detected:
-            return f"DETECTED EMOTIONS: {', '.join(emotions_detected)}\nGUIDANCE: {'; '.join(guidance)}"
+            result_parts.append(f"DETECTED EMOTIONS: {', '.join(emotions_detected)}")
+        
+        if guidance:
+            result_parts.append(f"RESPONSE GUIDANCE: {'; '.join(guidance[:3])}")  # Limit to top 3
+        
+        if special_context:
+            result_parts.append(f"SPECIAL CONTEXT: {'; '.join(special_context)}")
+        
+        if result_parts:
+            return "\n".join(result_parts)
         else:
-            return "No strong emotions detected yet - maintain warm, friendly tone"
+            # Default warmth based on conversation stage
+            if state.turn_count <= 1:
+                return "First interaction - be warm and welcoming, put them at ease"
+            elif state.turn_count <= 3:
+                return "Building rapport - maintain friendly, caring tone"
+            else:
+                return "Ongoing conversation - maintain warmth, stay focused on helping"
 
     def _determine_next_step(
         self,
@@ -459,7 +534,7 @@ Reply with ONLY your short, emotionally appropriate spoken response. No explanat
         )
     
     def _get_fallback_message(self, state: ConversationState) -> str:
-        """Get fallback message if LLM fails (multilingual)"""
+        """Get fallback message if LLM fails (multilingual with emotional awareness)"""
         # Map conversation steps to i18n keys
         key_map = {
             ConversationStep.GREETING: "va_fallback_greeting",
@@ -468,10 +543,28 @@ Reply with ONLY your short, emotionally appropriate spoken response. No explanat
             ConversationStep.RECORDING_INTRO: "va_fallback_recording",
             ConversationStep.GOODBYE: "va_fallback_goodbye",
             ConversationStep.ASHA_HANDOFF: "va_fallback_handoff",
+            ConversationStep.SAFETY_SUPPORT: "va_safety_support",
         }
         
         i18n_key = key_map.get(state.current_step, "va_fallback_greeting")
-        return get_text(i18n_key, state.language)
+        base_message = get_text(i18n_key, state.language)
+        
+        # Add emotional context prefix if emotions detected
+        emotional_context = self._detect_emotional_context(state)
+        prefix = ""
+        
+        if "URGENT" in emotional_context:
+            prefix = get_text("va_empathy_urgent", state.language) + " "
+        elif "FEARFUL" in emotional_context or "WORRIED" in emotional_context:
+            prefix = get_text("va_empathy_worried", state.language) + " "
+        elif "IN PAIN" in emotional_context:
+            prefix = get_text("va_empathy_pain", state.language) + " "
+        elif "SAD" in emotional_context or "EXHAUSTED" in emotional_context:
+            prefix = get_text("va_empathy_sad", state.language) + " "
+        elif "FRUSTRATED" in emotional_context:
+            prefix = get_text("va_empathy_frustrated", state.language) + " "
+        
+        return prefix + base_message
     
     def get_initial_greeting(self, language: str = "en") -> str:
         """Get the initial greeting message (multilingual)"""
