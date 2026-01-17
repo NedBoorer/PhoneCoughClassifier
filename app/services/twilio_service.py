@@ -105,6 +105,43 @@ class TwilioService:
             logger.error(f"Failed to download recording: {e}")
             return False
     
+    def send_whatsapp(
+        self,
+        to: str,
+        message: str,
+        from_number: Optional[str] = None
+    ) -> bool:
+        """
+        Send a WhatsApp text message.
+        
+        Args:
+            to: Recipient phone number (E.164 format)
+            message: Message text
+            from_number: Sender WhatsApp number (defaults to configured number)
+            
+        Returns:
+            True if sent successfully
+        """
+        try:
+            # Twilio WhatsApp numbers must be prefixed with 'whatsapp:'
+            if not to.startswith('whatsapp:'):
+                to = f"whatsapp:{to}"
+            
+            from_number = from_number or settings.twilio_whatsapp_from
+            if not from_number.startswith('whatsapp:'):
+                from_number = f"whatsapp:{from_number}"
+                
+            result = self.client.messages.create(
+                body=message,
+                from_=from_number,
+                to=to
+            )
+            logger.info(f"WhatsApp sent to {to}: SID={result.sid}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to send WhatsApp to {to}: {e}")
+            return False
+
     def send_whatsapp_with_media(
         self,
         to: str,
@@ -120,7 +157,7 @@ class TwilioService:
             if not to.startswith('whatsapp:'):
                 to = f"whatsapp:{to}"
             
-            from_number = settings.twilio_phone_number
+            from_number = settings.twilio_whatsapp_from  # Fixed: use WhatsApp sender
             if not from_number.startswith('whatsapp:'):
                 from_number = f"whatsapp:{from_number}"
                 
