@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Phone Cough Classifier</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <header>
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <h1>Phone Cough Classifier</h1>
+            <span style="font-size: 0.8rem; opacity: 0.8;">v1.0.0</span>
+        </div>
+    </header>
+
+    <div class="container">
+        <div class="card">
+            <h2>System Status</h2>
+            <p>Click the button below to verify the connection to the backend API services.</p>
+            <button id="check-health-btn">Check Health</button>
+            <div id="status"></div>
+        </div>
+
+        <div class="card">
+            <h2>Admin Panel: Referral Tracking</h2>
+            <p>Monitor patient referrals and doctor check-ins.</p>
+            <div class="admin-table-container">
+                <table id="referral-table">
+                    <thead>
+                        <tr>
+                            <th>Patient Phone</th>
+                            <th>Referred Doctor</th>
+                            <th>Referral Date</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <!-- Data will be populated by JS -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Documentation</h2>
+            <p>For API details and integration guides, please refer to the Swagger UI.</p>
+            <a href="/docs" style="text-decoration: none;">
+                <button style="background-color: #475569;">View API Docs</button>
+            </a>
+        </div>
+    </div>
+
+    <footer>
+        <p>&copy; 2026 Phone Cough Classifier Project</p>
+    </footer>
+
+    <script src="/static/js/main.js"></script>
+</body>
+</html>

@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pathlib import Path
 
 from app.config import settings
@@ -109,14 +110,8 @@ app.add_middleware(
 
 @app.get("/")
 async def root():
-    """Root endpoint with API info"""
-    return {
-        "name": "Phone Cough Classifier",
-        "version": "1.0.0",
-        "description": "Voice agent for cough classification",
-        "docs": "/docs",
-        "health": "/health"
-    }
+    """Root endpoint serving the frontend"""
+    return FileResponse(Path(__file__).parent / "static" / "index.html")
 
 
 @app.get("/health")
