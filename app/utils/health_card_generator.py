@@ -32,20 +32,33 @@ def generate_health_card(result, language: str = "en") -> Optional[str]:
         # Combine findings from different classifiers
         details = []
         
+        from app.utils.i18n import get_text
+        
         # Respiratory
         resp = result.screenings.get("respiratory")
         if resp:
-            from app.utils.i18n import get_text
             status_key = "status_detected" if resp.detected else "status_normal"
             status = get_text(status_key, language)
-            
-            # Label for Respiratory
-            # We don't have a specific label key for "Respiratory" in the provided i18n, 
-            # assuming "Respiratory: {status}" format, but let's try to localize the label if possible.
-            # For now, we will keep "Respiratory" english distinct or add a key if needed. 
-            # Looking at i18n.py, we don't have "Respiratory" key.
-            # Let's just localize the status part effectively.
             details.append(f"Respiratory: {status}")
+        
+        # Tuberculosis screening
+        tb = result.screenings.get("tuberculosis")
+        if tb:
+            tb_label = get_text("tb_screening_label", language)
+            if tb.detected:
+                if tb.severity == "high_risk":
+                    tb_status = get_text("tb_high_risk", language)
+                elif tb.severity == "moderate_risk":
+                    tb_status = get_text("tb_moderate_risk", language)
+                else:
+                    tb_status = get_text("tb_low_risk", language)
+                details.append(f"{tb_label}: ⚠️ {tb_status}")
+                # Add DOTS center info for TB detection
+                dots_info = get_text("tb_dots_info", language)
+                details.append(dots_info)
+            else:
+                tb_status = get_text("tb_normal", language)
+                details.append(f"{tb_label}: ✅ {tb_status}")
             
         # Recommendation
         details.append(result.recommendation)

@@ -29,6 +29,11 @@ router = APIRouter()
 # In-memory state cache (in production, use Redis)
 _call_states: dict[str, dict] = {}
 
+# Constants for call flow control
+MAX_NO_INPUT_ATTEMPTS = 5
+MAX_RECORDING_ATTEMPTS = 3
+MAX_FAMILY_SCREENINGS = 5
+
 
 def _get_voice_config(language: str) -> tuple[str, str]:
     """Get Twilio voice and language code for a language"""
@@ -36,6 +41,19 @@ def _get_voice_config(language: str) -> tuple[str, str]:
     if config:
         return config.twilio_voice, config.twilio_lang
     return "Polly.Aditi", "en-IN"
+
+
+def _get_call_info(call_sid: str) -> dict:
+    """Get call info with defaults"""
+    return _call_states.get(call_sid, {})
+
+
+def _cleanup_call(call_sid: str):
+    """Clean up call state and agent state"""
+    logger.info(f"Cleaning up state for {call_sid}")
+    agent = get_voice_agent_service()
+    agent.clear_state(call_sid)
+    _call_states.pop(call_sid, None)
 
 
 @router.post("/start")
@@ -63,13 +81,15 @@ async def voice_agent_start(
     state = agent.get_or_create_state(CallSid)
     state.language = language
     
-    # Store caller info
+    # Store caller info with tracking counters
     _call_states[CallSid] = {
         "caller_number": From,
         "language": language,
         "city": FromCity,
         "state": FromState,
         "country": FromCountry,
+        "recording_attempts": 0,
+        "family_screenings": 0,
     }
     
     # Get initial greeting
@@ -130,7 +150,8 @@ async def process_speech(
     # Check for max turn limit - guide to recording instead of hanging up
     agent = get_voice_agent_service()
     state = agent.get_or_create_state(CallSid)
-    if state.turn_count >= 15:
+    max_turns = getattr(settings, 'voice_agent_max_turns', 15)
+    if state.turn_count >= max_turns:
         logger.info(f"Max turns reached for {CallSid}, guiding to cough recording")
         voice, lang_code = _get_voice_config(language)
         response = VoiceResponse()
@@ -155,24 +176,26 @@ async def process_speech(
             language=language,
         )
     except Exception as e:
-        logger.error(f"Voice agent processing failed: {e}")
-        # Fallback response
+        logger.error(f"Voice agent processing failed for {CallSid}: {type(e).__name__}: {e}", exc_info=True)
+        # Fallback response - try to continue gracefully
         voice, lang_code = _get_voice_config(language)
         response = VoiceResponse()
         response.say(
-            "I'm sorry, I had trouble understanding. Let me try again." if language == "en" 
-            else "माफ़ कीजिए, मुझे समझने में दिक्कत हुई। मैं फिर से कोशिश करता हूं।",
+            "I'm sorry, I had trouble understanding. Let me help you with your cough check instead." if language == "en"
+            else "माफ़ कीजिए, मुझे समझने में दिक्कत हुई। आइए मैं आपकी खांसी की जांच करता हूं।",
             voice=voice,
             language=lang_code
         )
-        response.redirect(f"./continue?lang={language}")
+        # Fallback to recording instead of looping
+        response.redirect(f"./continue?lang={language}&step=recording")
         return twiml_response(response)
     
     voice, lang_code = _get_voice_config(language)
     response = VoiceResponse()
     
-    # Special handling for recording step - also handle RECORDING_INTRO as backup
-    if agent_response.should_record or agent_response.next_step == ConversationStep.RECORDING_INTRO:
+    # Special handling for recording step - should_record already checks for RECORDING states
+    if agent_response.should_record:
+        logger.info(f"Transitioning to recording for {CallSid}, step={agent_response.next_step}")
         return await _handle_recording_request(response, CallSid, language, voice, lang_code)
     
     # Special handling for goodbye
@@ -180,8 +203,7 @@ async def process_speech(
         response.say(agent_response.message, voice=voice, language=lang_code)
         response.hangup()
         # Clean up state
-        agent.clear_state(CallSid)
-        _call_states.pop(CallSid, None)
+        _cleanup_call(CallSid)
         return twiml_response(response)
     
     # Special handling for ASHA handoff - ask for confirmation first
@@ -237,18 +259,19 @@ async def _handle_recording_request(
 ) -> Response:
     """Handle the cough recording step"""
     
-    # Recording instruction
+    # Recording instruction (dynamic based on config)
+    duration = settings.max_recording_duration
     if language == "hi":
         instruction = (
             "अब मुझे आपकी खांसी सुननी है। "
             "बीप के बाद, कृपया जोर से खांसें। "
-            "मैं 10 सेकंड के लिए सुनूंगा।"
+            f"मैं {duration} सेकंड के लिए सुनूंगा।"
         )
     else:
         instruction = (
             "Now I need to hear your cough. "
             "After the beep, please cough clearly. "
-            "I'll listen for about 10 seconds."
+            f"I'll listen for about {duration} seconds."
         )
     
     response.say(instruction, voice=voice, language=lang_code)
@@ -289,6 +312,28 @@ async def recording_complete(
     response = VoiceResponse()
     
     if not RecordingUrl:
+        # Track recording attempts to prevent infinite loops
+        call_info = _call_states.get(CallSid, {})
+        recording_attempts = call_info.get("recording_attempts", 0) + 1
+
+        if recording_attempts >= MAX_RECORDING_ATTEMPTS:
+            logger.warning(f"Max recording attempts ({MAX_RECORDING_ATTEMPTS}) reached for {CallSid}")
+            response.say(
+                "I'm having trouble hearing your cough. Please try calling back later. Goodbye!"
+                if language == "en" else
+                "मुझे आपकी खांसी सुनने में दिक्कत हो रही है। कृपया बाद में फिर से कॉल करें। अलविदा!",
+                voice=voice,
+                language=lang_code
+            )
+            response.hangup()
+            _cleanup_call(CallSid)
+            return twiml_response(response)
+
+        # Update attempt counter
+        if CallSid in _call_states:
+            _call_states[CallSid]["recording_attempts"] = recording_attempts
+
+        logger.info(f"No recording received, attempt {recording_attempts}/{MAX_RECORDING_ATTEMPTS}")
         response.say(
             "I didn't hear anything. Let me try again." if language == "en"
             else "मुझे कुछ सुनाई नहीं दिया। मैं फिर से कोशिश करता हूं।",
@@ -306,30 +351,50 @@ async def recording_complete(
     )
     
     response.pause(length=1)
-    
-    # Processing message
+
+    # Processing message with realistic expectation
     response.say(
-        "Let me analyze your cough. Just a moment..." if language == "en"
-        else "मैं आपकी खांसी की जांच करता हूं। एक पल रुकें...",
+        "Let me analyze your cough. This will take a few seconds..." if language == "en"
+        else "मैं आपकी खांसी की जांच करता हूं। इसमें कुछ सेकंड लगेंगे...",
         voice=voice,
         language=lang_code
     )
+
+    # Add a brief pause for processing feel
+    response.pause(length=2)
     
     # Analyze recording
     try:
+        logger.info(f"Starting analysis for {CallSid}, RecordingUrl={RecordingUrl}")
         twilio_service = get_twilio_service()
         local_path = settings.recordings_dir / f"{CallSid}_agent.wav"
-        
+
         # Download might fail if URL is not public/reachable, handle gracefully
+        logger.debug(f"Downloading recording to {local_path}")
         await twilio_service.download_recording(RecordingUrl, str(local_path))
         
+        logger.info(f"Running ML analysis for {CallSid}")
         hub = get_model_hub()
         result = await hub.run_full_analysis_async(
             str(local_path),
             enable_respiratory=settings.enable_respiratory_screening,
             enable_parkinsons=settings.enable_parkinsons_screening,
             enable_depression=settings.enable_depression_screening,
+            enable_tuberculosis=settings.enable_tuberculosis_screening,
         )
+        logger.info(f"Analysis complete for {CallSid}: risk={result.overall_risk_level}, concern={result.primary_concern}, time={result.processing_time_ms}ms")
+
+        # Handle timeout case
+        if result.primary_concern == "timeout":
+            response.say(
+                "The analysis is taking longer than expected. Let me try again quickly."
+                if language == "en" else
+                "विश्लेषण में अधिक समय लग रहा है। मैं जल्दी से फिर से कोशिश करता हूं।",
+                voice=voice,
+                language=lang_code
+            )
+            response.redirect(f"./continue?lang={language}&step=recording")
+            return twiml_response(response)
 
         # --- SAVE TO DATABASE ---
         try:
@@ -371,9 +436,9 @@ async def recording_complete(
         # Get agent state for personalized response
         agent = get_voice_agent_service()
         state = agent.get_state(CallSid)
-        
+
         # Generate personalized results message
-        if state:
+        if state and hasattr(state, 'collected_info'):
             results_message = agent.get_results_message(
                 state,
                 result.overall_risk_level,
@@ -422,15 +487,30 @@ async def recording_complete(
         response.redirect(f"./goodbye?lang={language}")
         
     except Exception as e:
-        logger.error(f"Analysis failed: {e}")
-        response.say(
-            "I'm sorry, I had trouble analyzing your cough. Please try calling again later."
-            if language == "en" else
-            "माफ़ कीजिए, मुझे खांसी की जांच में दिक्कत हुई। कृपया बाद में फिर से कॉल करें।",
-            voice=voice,
-            language=lang_code
-        )
-        response.redirect(f"./goodbye?lang={language}")
+        logger.error(f"Analysis failed for {CallSid}: {type(e).__name__}: {e}", exc_info=True)
+
+        # Check if it's a download error vs analysis error
+        error_msg = str(e).lower()
+        if "download" in error_msg or "url" in error_msg or "network" in error_msg:
+            logger.error(f"Recording download failed for {CallSid}")
+            response.say(
+                "I couldn't access your recording. Please try again."
+                if language == "en" else
+                "मैं आपकी रिकॉर्डिंग तक नहीं पहुंच सका। कृपया फिर से कोशिश करें।",
+                voice=voice,
+                language=lang_code
+            )
+            response.redirect(f"./continue?lang={language}&step=recording")
+        else:
+            logger.error(f"ML analysis failed for {CallSid}")
+            response.say(
+                "I'm sorry, I had trouble analyzing your cough. Please try calling again later."
+                if language == "en" else
+                "माफ़ कीजिए, मुझे खांसी की जांच में दिक्कत हुई। कृपया बाद में फिर से कॉल करें।",
+                voice=voice,
+                language=lang_code
+            )
+            response.redirect(f"./goodbye?lang={language}")
     
     return twiml_response(response)
 
@@ -474,6 +554,27 @@ async def family_decision(
     # Check for yes response
     yes_indicators = ["yes", "1", "haan", "हां", "one", "ek"]
     if Digits == "1" or any(ind in user_input for ind in yes_indicators):
+        # Check family screening limit
+        call_info = _call_states.get(CallSid, {})
+        family_count = call_info.get("family_screenings", 0) + 1
+
+        if family_count >= MAX_FAMILY_SCREENINGS:
+            logger.info(f"Max family screenings ({MAX_FAMILY_SCREENINGS}) reached for {CallSid}")
+            response.say(
+                f"You've screened {MAX_FAMILY_SCREENINGS} people today. That's wonderful! Please call back tomorrow if you need to check more family members. Take care!"
+                if language == "en" else
+                f"आपने आज {MAX_FAMILY_SCREENINGS} लोगों की जांच की है। बहुत अच्छा! अगर और परिवार के सदस्यों की जांच करनी हो तो कल फिर कॉल करें। ख्याल रखें!",
+                voice=voice,
+                language=lang_code
+            )
+            response.redirect(f"./goodbye?lang={language}")
+            return twiml_response(response)
+
+        # Update family screening counter
+        if CallSid in _call_states:
+            _call_states[CallSid]["family_screenings"] = family_count
+            _call_states[CallSid]["recording_attempts"] = 0  # Reset recording attempts
+
         # Reset for next family member
         agent = get_voice_agent_service()
         state = agent.get_state(CallSid)
@@ -561,7 +662,7 @@ async def continue_conversation(
     # Default: continue with conversation
     gather = Gather(
         input="speech dtmf",
-        action=f"./process-speech?lang={language}",
+        action=f"./process-speech?lang={language}&attempt=0",
         timeout=10,
         speech_timeout="auto",
         language=lang_code,
@@ -574,8 +675,8 @@ async def continue_conversation(
     )
     
     response.append(gather)
-    response.redirect(f"./no-input?lang={language}")
-    
+    response.redirect(f"./no-input?lang={language}&attempt=1")
+
     return twiml_response(response)
 
 
@@ -592,8 +693,23 @@ async def handle_no_input(
     voice, lang_code = _get_voice_config(language)
     response = VoiceResponse()
     
-    logger.info(f"No-input handler: SID={CallSid}, attempt={attempt}")
-    
+    logger.info(f"No-input handler: SID={CallSid}, attempt={attempt}, language={language}")
+
+    # Safety: Prevent infinite loops by capping at max attempts (from config or constant)
+    max_attempts = getattr(settings, 'max_no_input_attempts', MAX_NO_INPUT_ATTEMPTS)
+    if attempt >= max_attempts:
+        logger.warning(f"Max no-input attempts reached for {CallSid}, ending call")
+        response.say(
+            "I'm sorry, I couldn't hear you. Please call back when you're ready. Goodbye!"
+            if language == "en" else
+            "माफ़ कीजिए, मुझे सुनाई नहीं दिया। कृपया जब तैयार हों तब फिर से कॉल करें। अलविदा!",
+            voice=voice,
+            language=lang_code
+        )
+        response.hangup()
+        _cleanup_call(CallSid)
+        return twiml_response(response)
+
     if attempt >= 3:
         # After 3 attempts, guide to cough recording instead of hanging up
         response.say(
@@ -654,10 +770,8 @@ async def goodbye(
     )
     
     response.hangup()
-    
+
     # Clean up state
-    agent = get_voice_agent_service()
-    agent.clear_state(CallSid)
-    _call_states.pop(CallSid, None)
-    
+    _cleanup_call(CallSid)
+
     return twiml_response(response)
