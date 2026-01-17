@@ -1,0 +1,44 @@
+# Auto-deploy to Fly.io on push to main branch
+#
+# Setup:
+# 1. Get your Fly.io API token: fly auth token
+# 2. Add to GitHub Secrets: Settings > Secrets > Actions > New repository secret
+#    Name: FLY_API_TOKEN
+#    Value: <your-token>
+# 3. Push to main branch to trigger deployment
+#
+# To disable: Rename this file to fly-deploy.yml.disabled
+
+name: Deploy to Fly.io
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  deploy:
+    name: Deploy app
+    runs-on: ubuntu-latest
+
+    # Only deploy if commit message doesn't contain [skip deploy]
+    if: "!contains(github.event.head_commit.message, '[skip deploy]')"
+
+    steps:
+      - name: 🛎 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🚀 Deploy to Fly.io
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: 📦 Deploy application
+        run: flyctl deploy --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+      - name: ✅ Deployment summary
+        run: |
+          echo "🎉 Deployment completed!"
+          echo "App URL: https://$(grep 'app = ' fly.toml | cut -d'"' -f2).fly.dev"
+          echo "Dashboard: https://fly.io/apps/$(grep 'app = ' fly.toml | cut -d'"' -f2)"

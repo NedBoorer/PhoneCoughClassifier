@@ -1,0 +1,124 @@
+# Fly.io Configuration for Phone Cough Classifier
+# Deploy with: fly deploy
+
+app = "phone-cough-classifier"
+primary_region = "sjc"  # San Jose, CA - change to your preferred region
+
+# Automatically stop/start based on requests
+kill_signal = "SIGINT"
+kill_timeout = "5s"
+
+[experimental]
+  auto_rollback = true
+
+[build]
+  # Use existing Dockerfile
+  dockerfile = "Dockerfile"
+
+[deploy]
+  release_command = "python -c 'from app.database.database import init_db; import asyncio; asyncio.run(init_db())'"
+
+[env]
+  # Application settings
+  ENVIRONMENT = "production"
+  DEBUG = "false"
+  PORT = "8000"
+
+  # Database (using SQLite for simplicity - Fly.io volumes persist data)
+  DATABASE_URL = "sqlite+aiosqlite:///./data/cough_classifier.db"
+
+  # Audio settings
+  MAX_RECORDING_DURATION = "10"
+  AUDIO_SAMPLE_RATE = "16000"
+
+  # ML Model settings
+  MODEL_PATH = "./models/cough_classifier.joblib"
+  PARKINSONS_MODEL_PATH = "./models/parkinsons_classifier.joblib"
+  DEPRESSION_MODEL_PATH = "./models/depression_classifier.joblib"
+  USE_HEAR_EMBEDDINGS = "false"
+  SCREENING_MODEL_DEVICE = "cpu"
+
+  # Feature flags
+  ENABLE_RESPIRATORY_SCREENING = "true"
+  ENABLE_PARKINSONS_SCREENING = "true"
+  ENABLE_DEPRESSION_SCREENING = "true"
+  ENABLE_MULTILINGUAL = "true"
+  ENABLE_MISSED_CALL = "true"
+  ENABLE_ASHA_MODE = "true"
+  ENABLE_KISAN_MANAS = "true"
+  ENABLE_WHATSAPP_REPORTS = "true"
+
+  # Logging
+  LOG_LEVEL = "INFO"
+  DEFAULT_LANGUAGE = "en"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 0  # Scale to zero when not in use
+  processes = ["app"]
+
+  # Health check configuration
+  [[http_service.checks]]
+    grace_period = "10s"
+    interval = "30s"
+    method = "GET"
+    timeout = "5s"
+    path = "/health"
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 8000
+  processes = ["app"]
+
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+    force_https = true
+
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+
+  [services.concurrency]
+    type = "connections"
+    hard_limit = 25
+    soft_limit = 20
+
+  [[services.tcp_checks]]
+    interval = "15s"
+    timeout = "2s"
+    grace_period = "5s"
+
+  [[services.http_checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/health"
+    protocol = "http"
+
+# Volume for persistent data (database, recordings, health cards)
+[mounts]
+  source = "cough_data"
+  destination = "/app/data"
+  initial_size = "1gb"
+
+# VM Resources
+[[vm]]
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1
+
+# Secrets (set these with: fly secrets set KEY=VALUE)
+# Do NOT put actual secrets in this file!
+#
+# Required secrets to set:
+# fly secrets set TWILIO_ACCOUNT_SID=your_account_sid
+# fly secrets set TWILIO_AUTH_TOKEN=your_auth_token
+# fly secrets set TWILIO_PHONE_NUMBER=your_phone_number
+# fly secrets set OPENAI_API_KEY=your_openai_key
+# fly secrets set TWILIO_WHATSAPP_FROM=whatsapp:+14155238886
+# fly secrets set DOCTOR_HELPLINE_NUMBER=+919999999999

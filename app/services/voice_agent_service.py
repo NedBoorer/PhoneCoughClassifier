@@ -161,6 +161,11 @@ Respond with ONLY the spoken message."""
     ) -> ConversationStep:
         """Determine the next conversation step based on current state"""
         
+        # Check for Handoff Intents FIRST (Safety Net - always active)
+        human_keywords = ["human", "person", "doctor", "talk to", "real person", "fake", "robot", "insaan", "baat karni", "asli", "asha"]
+        if any(kw in user_input.lower() for kw in human_keywords):
+            return ConversationStep.ASHA_HANDOFF
+        
         transitions = {
             ConversationStep.GREETING: ConversationStep.OCCUPATION,
             ConversationStep.LANGUAGE: ConversationStep.OCCUPATION,
@@ -184,11 +189,6 @@ Respond with ONLY the spoken message."""
         if current_step == ConversationStep.PESTICIDE_CHECK:
             if not extracted_info.get("is_farmer", False):
                 return ConversationStep.RECORDING_INTRO
-        
-        # Check for Handoff Intents (Safety Net)
-        human_keywords = ["human", "person", "doctor", "talking to", "real person", "fake", "robot", "insaan", "baat karni", "asli"]
-        if any(kw in user_input.lower() for kw in human_keywords):
-            return ConversationStep.ASHA_HANDOFF
 
         return transitions.get(current_step, ConversationStep.GOODBYE)
     

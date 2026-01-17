@@ -1088,3 +1088,17 @@ WHERE call_records.created_at >= ? AND call_records.created_at <= ? AND (call_re
 2026-01-15 14:50:25,370 - aiosqlite - DEBUG - executing functools.partial(<built-in method rollback of sqlite3.Connection object at 0x107ef27b0>)
 2026-01-15 14:50:25,370 - aiosqlite - DEBUG - operation functools.partial(<built-in method rollback of sqlite3.Connection object at 0x107ef27b0>) completed
 INFO:     127.0.0.1:56543 - "POST /admin/trigger-followups HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55250 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55263 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55288 - "GET /test/screening-models HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55300 - "GET /docs HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+2026-01-17 13:51:44,215 - app.main - INFO - 👋 Shutting down Phone Cough Classifier...
+2026-01-17 13:51:44,221 - aiosqlite - DEBUG - executing functools.partial(<built-in method close of sqlite3.Connection object at 0x107ef27b0>)
+2026-01-17 13:51:44,226 - aiosqlite - DEBUG - operation functools.partial(<built-in method close of sqlite3.Connection object at 0x107ef27b0>) completed
+2026-01-17 13:51:44,227 - aiosqlite - DEBUG - executing <function Connection.stop.<locals>.close_and_stop at 0x10c03bf70>
+2026-01-17 13:51:44,227 - aiosqlite - DEBUG - operation <function Connection.stop.<locals>.close_and_stop at 0x10c03bf70> completed
+2026-01-17 13:51:44,232 - app.database.database - INFO - Database connections closed
+INFO:     Application shutdown complete.
+INFO:     Finished server process [57490]

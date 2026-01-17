@@ -1,0 +1,93 @@
+# Fly.io Ignore File
+# Exclude files from Fly.io deployment context
+
+# Git
+.git
+.gitignore
+.github
+
+# Python cache
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+.eggs
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+.venv/
+ENV/
+env/
+.env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Tests and coverage
+tests/
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+*.coveragerc
+
+# Documentation (keep README.md)
+docs/
+*.md
+!README.md
+
+# Development files
+.env
+.env.local
+.env.development
+.env.example
+*.log
+nohup.out
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.bak
+
+# Large datasets (downloaded at runtime if needed)
+data/coughvid/
+data/*.zip
+external_models/*/datasets/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Docker files (not needed on Fly.io)
+docker-compose.yml
+.dockerignore
+
+# Deployment scripts (already on machine)
+scripts/download_coughvid.py
+scripts/train_*.py
+
+# Agent artifacts
+.gemini/
+.claude/
+.agent/
+
+# Runtime data (use Fly.io volumes)
+data/*.db
+data/health_cards/*
+recordings/*
+
+# Local testing
+*.http
+.env.test

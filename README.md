@@ -842,6 +842,70 @@ docker exec cough-app curl -f http://localhost:8000/health
 
 ---
 
+## ☁️ Fly.io Deployment (Recommended)
+
+**Deploy to Fly.io in minutes** with automatic HTTPS, global CDN, and auto-scaling:
+
+### Quick Deploy
+
+```bash
+# 1. Install Fly CLI
+curl -L https://fly.io/install.sh | sh
+
+# 2. Login to Fly.io
+fly auth login
+
+# 3. Run the deployment script
+./scripts/deploy_flyio.sh
+
+# 4. Set your secrets
+fly secrets set TWILIO_ACCOUNT_SID="your_sid"
+fly secrets set TWILIO_AUTH_TOKEN="your_token"
+fly secrets set TWILIO_PHONE_NUMBER="+1234567890"
+fly secrets set BASE_URL="https://your-app.fly.dev"
+
+# 5. Deploy
+fly deploy
+```
+
+### What You Get
+
+- ✅ **Automatic HTTPS** - Free SSL certificates
+- ✅ **Global CDN** - Fast response times worldwide
+- ✅ **Auto-scaling** - Scales to zero when idle (saves money)
+- ✅ **1GB persistent storage** - For database and recordings
+- ✅ **Health checks** - Automatic restarts if unhealthy
+- ✅ **Easy rollbacks** - One command to revert deployments
+
+### Your App URL
+
+After deployment, your app will be available at:
+```
+https://your-app-name.fly.dev
+```
+
+Use this URL in your Twilio webhook configuration:
+```
+https://your-app-name.fly.dev/india/voice/router
+```
+
+### Detailed Instructions
+
+See **[DEPLOY_FLYIO.md](./DEPLOY_FLYIO.md)** for complete deployment guide including:
+- Step-by-step setup
+- Secret management
+- Twilio webhook configuration
+- Monitoring and troubleshooting
+- Cost optimization tips
+
+### Cost
+
+- **Free tier**: 3 shared VMs with 256MB RAM each
+- **This app**: ~$2-3/month (1GB RAM, auto-scale to 0)
+- **Bandwidth**: 160GB/month included
+
+---
+
 ## 🧪 Testing
 
 ### Running the Test Suite
